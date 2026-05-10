@@ -1,0 +1,4 @@
+[2026-05-09T16:44:20.632Z] [INFO] Logger initialized. Log file: c:\Users\leopo\AppData\Roaming\Positron\User\globalStorage\positron.dev-containers\logs\dev-containers-2026-05-09T16-44-20-632Z.log
+[2026-05-09T16:44:20.632Z] [INFO] Activating positron-dev-containers extension
+[2026-05-09T16:44:20.632Z] [INFO] Dev Containers extension is disabled via settings. Skipping core activation.
+[2026-05-09T16:44:25.496Z] [INFO] Deactivating positron-dev-containers extension

@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "renv.lock": "json"
+    },
+    "positron.assistant.enable": true
+}

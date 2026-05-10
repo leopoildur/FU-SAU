@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "renv.lock": "json"
+    },
+    "positron.assistant.enable": true,
+    "workbench.colorTheme": "Experimental Light",
+    "security.workspace.trust.untrustedFiles": "open",
+    "workbench.editorAssociations": {
+        "*.xlsx": "default"
+    }
+}
