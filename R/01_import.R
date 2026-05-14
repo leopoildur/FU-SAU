@@ -150,3 +150,4 @@ skim(pass)
 skim(avis)
 
 # Importation OK ! Etape suivante : nettoyage et préparation des données.
+

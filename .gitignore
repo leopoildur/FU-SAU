@@ -1,1 +1,33 @@
 .Rproj.user
+
+# Paramètres utilisateur Positron
+User/
+
+# Fichiers Windows
+desktop.ini
+
+# Outputs lourds
+outputs/figures/
+
+# Cache Quarto
+.quarto/
+
+# Cache R
+.Rhistory
+.RData
+
+# Windows
+desktop.ini
+Thumbs.db
+
+# Positron / VSCode
+User/
+.vscode/
+
+# R
+.Rhistory
+.RData
+.Ruserdata
+
+# Logs
+*.log
