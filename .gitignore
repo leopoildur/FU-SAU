@@ -31,3 +31,7 @@ User/
 
 # Logs
 *.log
+.posit/assistant
+.httr-oauth
+.DS_Store
+.quarto

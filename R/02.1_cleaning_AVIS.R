@@ -1,485 +1,368 @@
-#! 02_cleaning.R =======================================================
-#! Nettoyage des données PMSI psychiatriques
-#! =====================================================================
+# ======================================================================
+# FU-SAU
+# 02.1_cleaning_AVIS.R
+# Nettoyage de la table AVIS
+# ======================================================================
+
+# Objectif :
+#   - nettoyer les données issues de la table AVIS
+#   - harmoniser les variables
+#   - créer les variables dérivées
+#   - contrôler la qualité des données
+#   - sauvegarder une table prête pour les analyses
+#
+# Entrée :
+#   data/interim/avis_raw.rds
+#
+# Sortie :
+#   data/processed/avis_clean.rds
+# ======================================================================
 
 
-
-#! Activation environnement =============================================
-
-renv::activate()
-
-
-
-#! Packages nécessaires =================================================
-
-library("tidyverse")
-library("janitor")
-library("skimr")
-library("lubridate")
-library("here")
-
-
-
-#! Import données brutes ================================================
+# Chargement du projet ==================================================
+# Charger les packages, fonctions et constantes du projet.
+# Importer la table AVIS brute.
 
 source(
-  here("R", "01_import.R")
+  here::here(
+    "R",
+    "utils",
+    "load_project.R"
+  )
+)
+
+avis <- readRDS(
+  here::here(
+    "data",
+    "interim",
+    "avis_raw.rds"
+  )
 )
 
 
+# Structure générale ====================================================
+# Décrire rapidement la table importée :
+# - dimensions
+# - types des variables
+# - premières vérifications globales
 
-#! TABLE AVIS ===========================================================
-#! Unité statistique = avis psychiatrique
-#! =====================================================================
-
-
-
-# Structure générale AVIS ===============================================
-
-
-# Dimensions ------------------------------------------------------------
+## Dimensions ------------------------------------------------------------
+# Vérifier le nombre de lignes et de variables.
 
 dim(avis)
 
-# 24 691 lignes (avis)
-# 16 variables avant nettoyage
-# OK
 
-
-# Types des variables ---------------------------------------------------
+## Types des variables ---------------------------------------------------
+# Vérifier le nom, le type et la structure des variables.
 
 glimpse(avis)
 
-walk(
-  names(avis),
-  ~ cat(.x, ":", class(avis[[.x]]), "\n")
-)
+
+## Contrôle global -------------------------------------------------------
+# Résumer rapidement la qualité de la table avant nettoyage.
+
+skim(avis)
 
 
-# Variables à nettoyer --------------------------------------------------
+# Identifiants ==========================================================
+# Nettoyer les identifiants patients et passages.
+# Vérifier leur cohérence et supprimer les doublons exacts.
 
-# TODO: convertir idpat de numeric vers character
-
-# TODO: convertir i_ddos de numeric vers character
-
-#* sexe
-# Character
-# OK
-
-# cp : numeric vers character
-
-# TODO: comprendre type_sejour
-# Mail à DUPORTAIL
-
-# TODO: harmoniser secteur selon format XXGXX
-
-# convertir mls en abréviations standardisées
-
-# TODO: nettoyer dp
-# Diagnostic principal CIM-10
-
-#* n_das
-# Numeric
-# OK
-
-# TODO: nettoyer das
-# Diagnostics associés CIM-10
-
-#* age
-# Numeric
-# OK
-
-#* an
-# Année de l'avis
-# OK
-
-# TODO: renommer et convertir debu_tt
-# Date/heure début passage
-
-# TODO: renommer et convertir fi_nt
-# Date/heure fin passage
-
-# TODO: renommer et convertir de_mt
-# Date/heure demande avis
-
-# NOTE: variable probablement peu pertinente cliniquement
-# mais utile pour vérifier cohérence chronologique
-
-# TODO: renommer et convertir avi_st
-# Date/heure avis psychiatrique
-
-
-# Résumé statistique ----------------------------------------------------
-
-
-# Données manquantes globales -------------------------------------------
-
-
-
-# Identifiants AVIS =====================================================
-
-
-# id_dos ---------------------------------------------------------------
-# Identifiant du passage aux urgences
-
-# Renommage + conversion character
+# Renommage -------------------------------------------------------------
+# Renommer les identifiants avec des noms explicites.
 
 avis <- avis |>
   rename(
-    iddos = i_ddos
-  ) |>
-  mutate(
-    iddos = as.character(iddos)
+    id_patient = idpat,
+    id_passage = i_ddos
   )
 
-# idpat ----------------------------------------------------------------
-# Identifiant patient anonymisé
 
-
-# Conversion character
+# Conversion ------------------------------------------------------------
+# Convertir les identifiants au format caractère.
 
 avis <- avis |>
   mutate(
-    idpat = as.character(idpat)
+    id_patient = as.character(id_patient),
+    id_passage = as.character(id_passage)
   )
 
 
+# Contrôles -------------------------------------------------------------
 
-# Vérification cohérence patient / passages -----------------------------
+# Nombre de patients uniques
+avis |>
+  summarise(
+    n_patients = n_distinct(id_patient)
+  )
 
-# 1 passage ne doit correspondre qu'à un seul patient
+# Nombre de passages uniques
+avis |>
+  summarise(
+    n_passages = n_distinct(id_passage)
+  )
 
-coherence_passage_patient <- avis |>
+# Un passage ne doit correspondre qu'à un seul patient
+avis |>
   distinct(
-    iddos,
-    idpat
+    id_passage,
+    id_patient
   ) |>
   count(
-    iddos,
+    id_passage,
     name = "n_patients"
   ) |>
   filter(
     n_patients > 1
   )
 
-coherence_passage_patient
-
-# NOTE:
-# Aucun problème de cohérence relationnelle détecté
-# Chaque passage (iddos) est associé à un seul patient (idpat)
-
-
-# Doublons exacts ======================================================
-
-# Nombre de doublons exacts --------------------------------------------
-
-sum(
-  duplicated(avis)
-)
-
-# NOTE: Les doublons exacts correspondent à des lignes strictement identiques.
-
-
-# Affichage des doublons -----------------------------------------------
-
-doublons_exacts <- avis[
-  duplicated(avis) |
-    duplicated(avis, fromLast = TRUE),
-]
-
-doublons_exacts
-
-# Vérification des groupes de doublons ---------------------------------
-
+# Un patient peut avoir plusieurs passages
 avis |>
   count(
-    across(everything())
+    id_patient,
+    name = "n_passages"
   ) |>
-  filter(
-    n > 1
+  arrange(
+    desc(n_passages)
   )
 
-# Suppression des doublons exacts --------------------------------------
 
+# Doublons --------------------------------------------------------------
+# Identifier puis supprimer les doublons exacts.
+
+# Nombre de doublons exacts
+sum(duplicated(avis))
+
+# Suppression des doublons exacts
 avis <- avis |>
   distinct()
 
-# Vérification après suppression ---------------------------------------
+# Vérification
+sum(duplicated(avis))
 
-sum(
-  duplicated(avis)
-)
+# Variables temporelles =================================================
+# Convertir les dates.
+# Vérifier leur cohérence.
+# Créer les variables utiles pour les analyses temporelles :
+# - heure
+# - nuit
+# - week-end
+# - délai
+# - jour de semaine
+# - etc.
 
-#* Tous les doublons exacts ont été supprimés.
-
-
-#! Variables temporelles AVIS ============================================
-
-# Nombre d'avis psychiatriques par année -------------------------------
-
-avis_par_an <- avis |>
-  count(
-    an,
-    name = "n_avis"
-  ) |>
-  arrange(an)
-
-avis_par_an
-
-
-# Représentation graphique ----------------------------------------------
-
-plot_avis_par_an <- avis_par_an |>
-  ggplot(
-    aes(
-      x = an,
-      y = n_avis
-    )
-  ) +
-  geom_col(
-    fill = "#4E79A7",
-    width = 0.7
-  ) +
-  geom_text(
-    aes(label = n_avis),
-    vjust = -0.7,
-    size = 4
-  ) +
-  scale_x_continuous(
-    breaks = avis_par_an$an
-  ) +
-  labs(
-    title = "Nombre d'avis psychiatriques par année",
-    x = "Année",
-    y = "Nombre d'avis"
-  ) +
-  theme_minimal(base_size = 14) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    axis.title = element_text(face = "bold")
-  )
-
-plot_avis_par_an
-
-
-
-# Correction variables temporelles -------------------------------------
-
-# Renommage variables
+# Renommage -------------------------------------------------------------
+# Renommer les variables temporelles pour expliciter leur contenu.
 
 avis <- avis |>
   rename(
-    debut_t = debu_tt,
-    fin_t = fi_nt,
-    dem_t = de_mt,
-    avis_t = avi_st
+    date_arrivee = debu_tt,
+    date_sortie = fi_nt,
+    date_demande = de_mt,
+    date_avis = avi_st
   )
 
+stopifnot(is.character(avis$date_arrivee))
 
-# Conversion datetime
+# Conversion ------------------------------------------------------------
+# Convertir les dates et heures au format POSIXct.
 
 avis <- avis |>
   mutate(
-    debut_t = parse_date_time(
-      debut_t,
-      orders = "dmy HM"
-    ),
+    date_arrivee = parse_datetime_fr(date_arrivee),
+    date_sortie = parse_datetime_fr(date_sortie),
+    date_demande = parse_datetime_fr(date_demande),
+    date_avis = parse_datetime_fr(date_avis)
+  )
 
-    fin_t = parse_date_time(
-      fin_t,
-      orders = "dmy HM"
-    ),
 
-    dem_t = parse_date_time(
-      dem_t,
-      orders = "dmy HM"
-    ),
+# Contrôle --------------------------------------------------------------
+# Vérifier le nombre de valeurs manquantes après conversion.
 
-    avis_t = parse_date_time(
-      avis_t,
-      orders = "dmy HM"
+avis |>
+  summarise(
+    across(
+      c(
+        date_arrivee,
+        date_sortie,
+        date_demande,
+        date_avis
+      ),
+      ~ sum(is.na(.))
     )
   )
 
 
-
-# Variables horaires ----------------------------------------------------
-
-avis <- avis |>
-  mutate(
-    heure_debut = hour(debut_t),
-    heure_avis = hour(avis_t),
-    heure_fin = hour(fin_t)
-  )
-
-
-
-# Variables nocturnes ---------------------------------------------------
+# Variables dérivées ----------------------------------------------------
+# Créer les variables temporelles utiles aux analyses.
 
 avis <- avis |>
   mutate(
-    nuit_debut = hour(debut_t) >= 18 |
-      hour(debut_t) < 8,
 
-    nuit_avis = hour(avis_t) >= 18 |
-      hour(avis_t) < 8,
+    # Heure de la journée
+    heure_arrivee = get_hour(date_arrivee),
+    heure_avis = get_hour(date_avis),
+    heure_sortie = get_hour(date_sortie),
 
-    nuit_fin = hour(fin_t) >= 18 |
-      hour(fin_t) < 8
+    # Passage de nuit
+    nuit_arrivee = is_night(date_arrivee),
+    nuit_avis = is_night(date_avis),
+    nuit_sortie = is_night(date_sortie),
+
+    # Passage le week-end
+    weekend_arrivee = is_weekend(date_arrivee),
+    weekend_avis = is_weekend(date_avis),
+    weekend_sortie = is_weekend(date_sortie),
+
+    # Jour de la semaine
+    jour_arrivee = weekday_label(date_arrivee),
+    jour_avis = weekday_label(date_avis),
+    jour_sortie = weekday_label(date_sortie),
+
+    # Délais
+    delai_avis = date_avis - date_arrivee,
+    LOS = date_sortie - date_arrivee
   )
 
-
-
-# Variables week-end ----------------------------------------------------
+# Garde -----------------------------------------------------------------
+# Identifier les avis réalisés pendant une garde.
 
 avis <- avis |>
   mutate(
-    we_debut = wday(debut_t) %in% c(1, 7),
+    ferie = is_holiday(date_avis),
+    garde = nuit_avis | weekend_avis | ferie
+  )
 
-    we_avis = wday(avis_t) %in% c(1, 7),
+# Contrôle
 
-    we_fin = wday(fin_t) %in% c(1, 7)
+avis |>
+  count(
+    garde,
+    sort = TRUE
+  )
+
+avis |>
+  count(
+    ferie
   )
 
 
+# Cohérence chronologique -----------------------------------------------
+# Vérifier l'ordre logique des événements.
 
-# Durée entre arrivée et avis ------------------------------------------------------
+avis |>
+  filter(date_sortie < date_arrivee)
 
-avis <- avis |>
-  mutate(
-    delai_avis = avis_t - debut_t
+# = 0
+
+avis |>
+  filter(date_demande < date_arrivee)
+
+# = 6
+# CàD 6 passages ou la demande d'avis précède l'arrivée.
+# Probable erreur de saisie
+# Peu d'impact, négligeable, enregistré pour analyse ultérieure
+
+anomalies_demande <- avis |>
+  filter(
+    date_demande < date_arrivee
+  )
+
+avis |>
+  filter(date_avis < date_arrivee)
+
+# = 16
+# CàD 16 avis précédant l'arrivée
+# Probable erreur de saisie
+# Peu d'impact, négligeable, enregistré pour analyse ultérieure
+
+anomalies_avis_avant <- avis |>
+  filter(
+    date_avis < date_arrivee
+  )
+
+avis |>
+  filter(date_avis > date_sortie)
+
+# = 1068
+# CàD 1068 avis édités après la sortie
+# Evaluation rédigée ou corrigée après la sortie
+# Pas d'impact sur la durée de séjour
+# A enregistrer pour vérification (exclure comme donnée aberrant si delta trop important
+
+anomalies_avis_apres <- avis |>
+  filter(
+    date_avis > date_sortie
   )
 
 
-# Jour de semaine -------------------------------------------------------
+# Résumé descriptif -----------------------------------------------------
+# Décrire rapidement les durées créées (en min)
 
-avis <- avis |>
-  mutate(
-    sem_debut = wday(
-      debut_t,
-      label = TRUE,
-      abbr = FALSE
-    ),
+summary(as.numeric(avis$delai_avis))
 
-    sem_avis = wday(
-      avis_t,
-      label = TRUE,
-      abbr = FALSE
-    ),
-
-    sem_fin = wday(
-      fin_t,
-      label = TRUE,
-      abbr = FALSE
-    )
-  )
-
-
-# TODO: créer variable garde
-# Inclure :
-# - nuit
-# - week-end
-# - jours fériés
+summary(as.numeric(avis$LOS))
 
 
 
-# Variables démographiques AVIS =========================================
 
+# Variables démographiques ==============================================
+# Nettoyer les variables décrivant les patients :
+# - âge
+# - sexe
+# - code postal
+# - département
+# Vérifier les valeurs aberrantes.
 
-# Âge ===================================================================
-
-# Résumé statistique ----------------------------------------------------
+# Âge -------------------------------------------------------------------
+# Vérifier la distribution de l'âge et rechercher d'éventuelles valeurs
+# aberrantes.
 
 summary(avis$age)
 
-# Min.      : 15
-# 1st Qu.   : 25
-# Median    : 36
-# Mean      : 39
-# 3rd Qu.   : 50
-# Max.      : 101
-
-#* Pas d'âge aberrant détecté
-
-
-# Distribution des âges -------------------------------------------------
-
-plot_age <- avis |>
+avis |>
   ggplot(
     aes(x = age)
   ) +
   geom_histogram(
     binwidth = 5,
     fill = "#4E79A7",
-    color = "white",
-    alpha = 0.9
-  ) +
-  geom_vline(
-    xintercept = median(
-      avis$age,
-      na.rm = TRUE
-    ),
-    color = "#E15759",
-    linewidth = 1.2,
-    linetype = "dashed"
-  ) +
-  scale_x_continuous(
-    breaks = seq(
-      0,
-      100,
-      by = 10
-    )
+    color = "white"
   ) +
   labs(
     title = "Distribution des âges",
-    subtitle = "Population des avis psychiatriques",
     x = "Âge (années)",
     y = "Nombre d'avis"
   ) +
-  theme_minimal(base_size = 14) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    axis.title = element_text(face = "bold")
-  )
-
-plot_age
+  theme_fu()
 
 
-# NOTE: distribution légèrement asymétrique à droite
-# Médiane à 36 ans
-# Population relativement jeune
-
-
-
-# Sexe ==================================================================
+# Sexe ------------------------------------------------------------------
+# Remplacer le codage PMSI par des modalités explicites.
 
 avis <- avis |>
   mutate(
-    sexe_label = case_when(
-      sexe == "1" ~ "M",
-      sexe == "2" ~ "F",
-      TRUE ~ NA_character_
-    )
+    sexe = get_sexe_label(sexe)
+  )
+
+avis |>
+  count(
+    sexe,
+    sort = TRUE
   )
 
 
-
-# Code postal ===========================================================
-
-# Conversion character --------------------------------------------------
+# Code postal -----------------------------------------------------------
+# Renommer la variable et harmoniser son format.
 
 avis <- avis |>
+  rename(
+    code_postal = cp
+  ) |>
   mutate(
-    cp = as.character(cp)
-  )
-
-
-# Correction zéros initiaux ---------------------------------------------
-
-avis <- avis |>
-  mutate(
-    cp = str_pad(
-      cp,
+    code_postal = as.character(code_postal),
+    code_postal = stringr::str_pad(
+      code_postal,
       width = 5,
       side = "left",
       pad = "0"
@@ -487,286 +370,687 @@ avis <- avis |>
   )
 
 
-
-# Département de résidence ----------------------------------------------
-
-avis <- avis |>
-  mutate(
-    cp_dep = case_when(
-
-      # Étranger
-      str_starts(cp, "99") ~ "ETRANGER",
-
-      # DOM-TOM
-      str_sub(cp, 1, 3) %in% c(
-        "971",
-        "972",
-        "973",
-        "974",
-        "975",
-        "976",
-        "977",
-        "978"
-      ) ~ str_sub(cp, 1, 3),
-
-      # Métropole
-      TRUE ~ str_sub(cp, 1, 2)
-    )
-  )
-
-
-
-#! Variables psychiatriques AVIS ========================================
-
-
-# Diagnostics CIM-10 ----------------------------------------------------
-
-# TODO: nettoyer dp
-# Diagnostic principal
-
-# conversion en character -----------------------------------------------
+# Département -----------------------------------------------------------
+# Déduire le département de résidence à partir du code postal.
 
 avis <- avis |>
   mutate(
-    dp = as.character(dp)
+    departement = get_department(code_postal)
   )
 
-# Harmonisation ------------------------------------------------
 
-avis <- avis |>
-  mutate(
-    dp = str_trim(dp),
-    dp = str_to_upper(dp)
+avis |>
+  count(
+    departement,
+    sort = TRUE
   )
 
-# NOTE:
-# - suppression espaces inutiles
-# - harmonisation majuscules
 
-# Vérification format CIM-10 -------------------------------------------
+# Contrôles -------------------------------------------------------------
+# Vérifier la cohérence des variables démographiques.
 
 avis |>
   filter(
-    !is.na(dp),
-    !str_detect(dp, "^[A-Z][0-9]")
-  ) |>
-  count(
-    dp,
-    sort = TRUE
+    age < 15 |
+      age > 110
   )
-
-# NOTE:
-# Détecte les diagnostics au format inhabituel
-
-# Fréquence diagnostics principaux -------------------------------------
 
 avis |>
-  count(
-    dp,
-    sort = TRUE
-  )
-
-# Première lettre CIM-10 -----------------------------------------------
-
-avis <- avis |>
-  mutate(
-    dp_lettre = str_sub(dp, 1, 1)
-  )
-
-# Décompte par lettre CIM-10 -------------------------------------------
-
-avis |>
-  count(
-    dp_lettre,
-    sort = TRUE
-  )
-
-#   dp_lettre     n
-#   <chr>     <int>
-# 1 F         23544
-# 2 R           931
-# 3 Z           109
-# 4 T            87
-# 5 G            13
-# 6 D             1
-
-# Grandes classes CIM-10 psychiatriques ================================
-
-avis <- avis |>
-  mutate(
-    dp_f_classe = case_when(
-
-      str_starts(dp, "F0") ~ "F0 - Neurocognitif",
-
-      str_starts(dp, "F1") ~ "F1 - Addictions",
-
-      str_starts(dp, "F2") ~ "F2 - Psychotique",
-
-      str_starts(dp, "F3") ~ "F3 - Humeur",
-
-      str_starts(dp, "F4") ~ "F4 - Anxieux / stress",
-
-      str_starts(dp, "F5") ~ "F5 - Comportement physiologique",
-
-      str_starts(dp, "F6") ~ "F6 - Personnalité",
-
-      str_starts(dp, "F7") ~ "F7 - Déficience intellectuelle",
-
-      str_starts(dp, "F8") ~ "F8 - Développement",
-
-      str_starts(dp, "F9") ~ "F9 - Enfance / adolescence",
-
-      TRUE ~ NA_character_
+  summarise(
+    across(
+      c(
+        age,
+        sexe,
+        code_postal,
+        departement
+      ),
+      ~ sum(is.na(.))
     )
   )
 
-# Décompte par grandes classes CIM-10 psychiatriques --------------------------------
+# Variables psychiatriques ==============================================
 
+# Diagnostic principal --------------------------------------------------
+# Renommer et harmoniser le diagnostic principal CIM-10.
+
+avis <- avis |>
+  rename(
+    diag_p = dp
+  ) |>
+  mutate(
+    diag_p = stringr::str_trim(diag_p),
+    diag_p = stringr::str_to_upper(diag_p)
+  )
+
+# Distribution des diagnostics principaux
 avis |>
   count(
-    dp_f_classe,
+    diag_p,
     sort = TRUE
   )
 
-# Représentation graphique par grandes classes CIM-10 psychiatriques --------------------------------
 
+# Diagnostics associés --------------------------------------------------
+# Renommer les variables relatives aux diagnostics associés.
+
+avis <- avis |>
+  rename(
+    nb_diag_a = n_das,
+    diag_a = das
+  ) |>
+  mutate(
+    diag_a = stringr::str_trim(diag_a),
+    diag_a = stringr::str_to_upper(diag_a)
+  )
+
+# Distribution du nombre de diagnostics associés
 avis |>
   count(
-    dp_f_classe,
+    nb_diag_a,
     sort = TRUE
-  ) |>
-  ggplot(
-    aes(
-      x = reorder(dp_f_classe, n),
-      y = n
-    )
-  ) +
-  geom_col(
-    fill = "#4E79A7"
-  ) +
-  coord_flip() +
-  labs(
-    title = "Grandes classes diagnostiques psychiatriques",
-    x = "Classe CIM-10",
-    y = "Nombre d'avis"
-  ) +
-  theme_minimal(base_size = 14)
-# TODO: nettoyer das
-# Diagnostics associés
-
-# TODO: créer catégories diagnostiques
-# - suicidaire
-# - psychotique
-# - addictologique
-# - thymique
-# - anxieux
+  )
 
 
-
-# Variables organisationnelles AVIS =====================================
-
-
-# MLS - Mode légal de soins ---------------------------------------------
+# Variables dérivées ----------------------------------------------------
+# Créer les niveaux de codage du diagnostic principal.
 
 avis <- avis |>
   mutate(
-    mls_label = case_when(
+
+    # Chapitre CIM-10 (1 caractère)
+    diag_p_1 = stringr::str_sub(
+      diag_p,
+      1,
+      1
+    ),
+
+    # Classe CIM-10 (2 caractères)
+    diag_p_2 = stringr::str_sub(
+      diag_p,
+      1,
+      2
+    )
+
+  )
+
+    # Sous-classe CIM-10 (3 caractères)
+avis <- avis |>
+  mutate(
+    diag_p_3 = stringr::str_sub(
+      diag_p,
+      1,
+      3
+    )
+  )
+
+# Contrôles -------------------------------------------------------------
+# Vérifier la qualité des diagnostics.
+
+# Répartition des chapitres CIM-10
+
+avis |>
+  count(
+    diag_p_1,
+    sort = TRUE
+  )
+
+# Répartition des classes CIM-10
+
+avis |>
+  count(
+    diag_p_2,
+    sort = TRUE
+  )
+
+# Valeurs manquantes
+avis |>
+  summarise(
+    across(
+      c(
+        diag_p,
+        diag_a
+      ),
+      ~ sum(is.na(.))
+    )
+  )
+
+# Codes CIM-10 de longueur anormale
+avis |>
+  filter(
+    nchar(diag_p) < 3
+  )
+
+# = 0
+
+# Diagnostics ne commençant pas par une lettre
+avis |>
+  filter(
+    !stringr::str_detect(
+      diag_p,
+      "^[A-Z]"
+    )
+  )
+
+# = 0
+
+# Diagnostics associés ==================================================
+
+# Nettoyage -------------------------------------------------------------
+
+avis <- avis |>
+  mutate(
+
+    # Suppression des espaces multiples
+    diag_a = stringr::str_squish(diag_a),
+
+    # Chaînes vides -> NA
+    diag_a = na_if(diag_a, "")
+
+  )
+
+
+# Transformation en liste -----------------------------------------------
+
+avis <- avis |>
+  mutate(
+
+    diag_a = stringr::str_split(
+      diag_a,
+      pattern = "\\s+"
+    )
+
+  )
+
+
+# Remplacement des NA par des listes vides ------------------------------
+
+avis$diag_a <-
+  lapply(
+    avis$diag_a,
+    function(x) {
+
+      if (length(x) == 1 && is.na(x)) {
+
+        character(0)
+
+      } else {
+
+        x
+
+      }
+
+    }
+  )
+
+
+# Variables dérivées ----------------------------------------------------
+
+    # Famille CIM-10 (1 caractèrs)
+
+avis <- avis |>
+  mutate(
+
+    diag_a_1 = lapply(
+      diag_a,
+      function(x) stringr::str_sub(x, 1, 1)
+    ),
+
+    # Classe CIM-10 (2 caractères)
+
+    diag_a_2 = lapply(
+      diag_a,
+      function(x) stringr::str_sub(x, 1, 2)
+    )
+
+  )
+
+    # Sous-classe CIM-10 (3 caractères)
+
+avis <- avis |>
+  mutate(
+
+    diag_a_3 = lapply(
+      diag_a,
+      function(x) {
+
+        stringr::str_sub(
+          x,
+          1,
+          3
+        )
+
+      }
+
+    )
+
+  )
+
+
+# Contrôles -------------------------------------------------------------
+
+# Nombre réel de diagnostics associés
+
+avis <- avis |>
+  mutate(
+    nb_diag_a_calcule = lengths(diag_a)
+  )
+
+
+# Comparaison avec la variable PMSI
+
+avis |>
+  count(
+    nb_diag_a,
+    nb_diag_a_calcule
+  )
+
+
+# Nombre de dossiers sans diagnostic associé
+
+sum(
+  lengths(avis$diag_a) == 0
+)
+
+
+# Distribution du nombre de diagnostics associés
+
+table(
+  lengths(avis$diag_a)
+)
+
+
+# Aperçu
+
+avis |>
+  select(
+    diag_a,
+    diag_a_1,
+    diag_a_2
+  ) |>
+  slice_head(
+    n = 10
+  )
+
+# Diagnostics totaux ==================================================
+
+
+avis <- avis |>
+  mutate(
+
+    diag_t = purrr::map2(
+      diag_p,
+      diag_a,
+      function(dp, das) {
+
+        unique(
+          c(
+            dp,
+            das
+          )
+        )
+
+      }
+
+    )
+
+  )
+
+avis <- avis |>
+  mutate(
+
+    diag_t_1 = lapply(
+      diag_t,
+      function(x) {
+
+        stringr::str_sub(
+          x,
+          1,
+          1
+        )
+
+      }
+
+    )
+
+  )
+
+avis <- avis |>
+  mutate(
+
+    diag_t_2 = lapply(
+      diag_t,
+      function(x) {
+
+        stringr::str_sub(
+          x,
+          1,
+          2
+        )
+
+      }
+
+    )
+
+  )
+
+avis <- avis |>
+  mutate(
+
+    diag_t_3 = lapply(
+      diag_t,
+      function(x) {
+
+        stringr::str_sub(
+          x,
+          1,
+          3
+        )
+
+      }
+
+    )
+
+  )
+
+avis <- avis |>
+  mutate(
+    nb_diag_t = lengths(diag_t)
+  )
+
+avis |>
+  count(
+    nb_diag_t,
+    sort = TRUE
+  )
+
+avis |>
+  select(
+    diag_p,
+    diag_a,
+    diag_t,
+    nb_diag_t
+  ) |>
+  slice_head(
+    n = 10
+  )
+
+# Variables organisationnelles ==========================================
+
+# Mode légal de soins ---------------------------------------------------
+# Nettoyer et vérifier la variable MLS.
+
+avis <- avis |>
+  mutate(
+
+    mls_f = case_when(
+
       mls == "1" ~ "SL",
+
       mls == "3" ~ "SPDRE",
-      mls == "4" ~ "122-1",
+
+      mls == "4" ~ "PENAL",
+
       mls == "5" ~ "OPP",
+
+      mls == "6" ~ "DETENUS",
+
       mls == "7" ~ "SPDT",
+
       mls == "8" ~ "SPPI",
-      TRUE ~ "Inconnu"
+
+      TRUE ~ "INCONNU"
+
     )
+
+  )
+
+# Regroupement du mode légal de soins ===================================
+
+avis <- avis |>
+  mutate(
+
+    mls_g = case_when(
+
+      mls_f == "SL" ~ "SL",
+
+      mls_f %in% c(
+        "SPDT",
+        "SPPI",
+        "SPDRE"
+      ) ~ "SSC",
+
+      mls_f %in% c(
+        "OPP",
+        "DETENUS",
+        "PENAL"
+      ) ~ "AUTRES",
+
+      TRUE ~ "INCONNU"
+
+    )
+
+  )
+
+
+# Contrôles -------------------------------------------------------------
+
+# Distribution des modes légaux de soins
+avis |>
+  count(
+    mls_f,
+    sort = TRUE
+  )
+
+# Correspondance PMSI ↔ libellés
+avis |>
+  count(
+    mls,
+    mls_f,
+    sort = TRUE
+  )
+
+# Vérification des valeurs non codées
+avis |>
+  filter(
+    mls_f == "INCONNU"
+  )
+
+# Distribution des groupes
+
+avis |>
+  count(
+    mls_g,
+    sort = TRUE
+  )
+
+# Correspondance avec le codage détaillé
+
+avis |>
+  count(
+    mls_f,
+    mls_g,
+    sort = TRUE
+  )
+
+# Vérification des valeurs non classées
+
+avis |>
+  filter(
+    mls_g == "INCONNU"
+  )
+
+# Secteur psychiatrique -------------------------------------------------
+# Nettoyer la variable secteur.
+
+avis <- avis |>
+  mutate(
+    secteur = stringr::str_squish(secteur)
+  )
+
+# Distribution
+avis |>
+  count(
+    secteur,
+    sort = TRUE
+  )
+
+# Secteur géographique 3 variables (94, IDF hors 94, Hors IDF)
+
+avis <- avis |>
+  mutate(
+
+    secteur_f = dplyr::case_when(
+
+      # Secteurs du Val-de-Marne
+      stringr::str_detect(secteur, "SECTEUR\\s+[0-9]{2}$") ~
+        paste0(
+          "94G",
+          stringr::str_extract(secteur, "[0-9]{2}$")
+        ),
+
+      # IDF hors secteur 94
+      stringr::str_detect(secteur, "IDF") ~
+        "IDF hors 94",
+
+      # Tout le reste
+      TRUE ~
+        "Hors IDF"
+
+    )
+
+  )
+
+# Hôpital de référence ==================================================
+
+avis <- avis |>
+  mutate(
+
+    hopital_secteur = case_when(
+
+      # Centre hospitalier Les Murets
+      secteur_f %in% c(
+        "94G01",
+        "94G02",
+        "94G03",
+        "94G04",
+        "94G05"
+      ) ~ "MUR",
+
+      # Hôpitaux universitaires Henri-Mondor
+      secteur_f %in% c(
+        "94G06",
+        "94G07",
+        "94G08"
+      ) ~ "ACH",
+
+      # Centre hospitalier intercommunal de Villeneuve-Saint-Georges
+      secteur_f == "94G09" ~ "VSG",
+
+      # Groupe hospitalier Paul Guiraud
+      secteur_f %in% c(
+        "94G10",
+        "94G11",
+        "94G13",
+        "94G15",
+        "94G17"
+      ) ~ "PGV",
+
+      # Hôpital Paul Brousse
+      secteur_f == "94G12" ~ "PBV",
+
+      # Hôpitaux de Saint-Maurice
+      secteur_f == "94G16" ~ "HSM",
+
+      # Hors Val-de-Marne
+      TRUE ~ "AUTRES"
+
+    )
+
+  )
+
+# Contrôles
+
+avis |>
+  count(
+    secteur,
+    secteur_f,
+    sort = TRUE
   )
 
 avis |>
   count(
-    mls_label,
+    hopital_secteur,
     sort = TRUE
   )
 
-# SL       : 22 450
-# SPDT     : 1 428
-# SPPI     :   488
-# SPDRE    :   321
-# 122-1    :     3
-# OPP      :     1
+# # Type de séjour (variable inutile à priori)--------------------------------------------------------
+# # Nettoyer le type de séjour.
+#
+# avis <- avis |>
+#   mutate(
+#     type_sejour = stringr::str_trim(type_sejour)
+#   )
+#
+# # Distribution
+# avis |>
+#   count(
+#     type_sejour,
+#     sort = TRUE
+#   )
 
 
 
-# Harmonisation variables catégorielles =================================
 
-# TODO: uniformiser modalités
-
-# TODO: gérer accents
-
-# TODO: gérer espaces
-
-# TODO: gérer majuscules / minuscules
-
-# TODO: regrouper modalités rares
+# Contrôle qualité dans utils/checks.R ======================================================
+# Vérifier la qualité finale de la table :
+# - dimensions
+# - valeurs manquantes
+# - doublons
+# - cohérence des variables
+# - contrôle des identifiants
 
 
+# Sauvegarde ============================================================
 
-# Valeurs manquantes AVIS ===============================================
+# Création du dossier si nécessaire
+dir.create(
+  here::here(
+    "data",
+    "processed"
+  ),
+  recursive = TRUE,
+  showWarnings = FALSE
+)
 
-# TODO: quantifier NA
-
-# TODO: analyser patterns de NA
-
-# TODO: identifier variables critiques incomplètes
-
-# TODO: décisions méthodologiques
-
-
-
-# Valeurs aberrantes AVIS ===============================================
-
-# TODO: détecter âges aberrants
-
-# TODO: détecter dates aberrantes
-
-# TODO: détecter modalités incohérentes
-
-# TODO: détecter codes CIM invalides
-
-# TODO: détecter valeurs impossibles
-
-
-
-# Variables dérivées AVIS ===============================================
-
-# TODO: nombre d'avis par passage
-
-# TODO: nombre d'avis par patient
-
-# TODO: catégories diagnostiques
-
-# TODO: variable suicidaire binaire
-
-# TODO: variable psychotique binaire
-
-# TODO: temporalité des avis
-
-
-
-# Vérification finale AVIS ==============================================
-
-# TODO: contrôle dimensions finales
-
-# TODO: contrôle unicité
-
-# TODO: contrôle qualité final
-
-# TODO: sauvegarder avis_clean
-
-
-
-#! Sauvegarde AVIS ======================================================
-
+# Sauvegarde de la table nettoyée
 saveRDS(
   avis,
-  here("data", "interim", "avis_clean.rds")
+  here::here(
+    "data",
+    "processed",
+    "avis_clean.rds"
+  )
 )
+
+# Export optionnel en CSV (utile pour vérifier les données)
+# write_csv(
+#   avis,
+#   here::here(
+#     "data",
+#     "processed",
+#     "avis_clean.csv"
+#   )
+# )
+
+
+# Fin du script =========================================================
+
+gitmessage("======================================================")
+message(" Nettoyage de la table AVIS terminé avec succès")
+message("------------------------------------------------------")
+message(" Nombre de lignes   : ", nrow(avis))
+message(" Nombre de variables: ", ncol(avis))
+message(" Nombre de patients : ", n_distinct(avis$id_patient))
+message(" Nombre de passages : ", n_distinct(avis$id_passage))
+message(" Fichier sauvegardé : data/processed/avis_clean.rds")
+message("======================================================")

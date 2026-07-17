@@ -1,136 +1,65 @@
 # ======================================================================
 # FU-SAU
-# Importation des données PMSI de 2021 à 2025
-# CHU Henri Mondor
+# 01_import.R
+# ======================================================================
+#
+# Objectif :
+#   - importer les tables Excel
+#   - contrôler l'importation
+#   - sauvegarder les données brutes au format RDS
+#
+# Entrée :
+#   data/raw/FU-SAU_DATA.xlsx
+#
+# Sortie :
+#   data/interim/
+#     - avis_raw.rds
+#     - pass_raw.rds
+#     - legend.rds
+#
+# ======================================================================
+# ======================================================================
+# FU-SAU
+# 01_import.R
+# Importation des données
 # ======================================================================
 
-# Objectif du script :
-# - importer les données PMSI depuis Excel
-# - vérifier la qualité de l'importation
-# - explorer la structure relationnelle des tables
+# Chargement de l'environnement -----------------------------------------
 
-# Tables importées :
-# - LEGEND : dictionnaire des variables
-# - PASS   : passages aux urgences psychiatriques
-# - AVIS   : avis psychiatriques
+source(here::here("R", "utils", "load_project.R"))
 
-# Auteur : Léopold ENGELSTEIN
-# Date   : 10/05/2026
-# ======================================================================
+# Vérification des fichiers ---------------------------------------------
 
-
-# Activation de l'environnement renv ------------------------------------
-
-renv::activate()
-
-
-# Packages nécessaires --------------------------------------------------
-
-library(tidyverse)
-library(readxl)
-library(janitor)
-library(here)
-library(skimr)
-
-
-# Définition du chemin du fichier ---------------------------------------
-
-file_path <- here(
-  "data",
-  "raw",
-  "FU-SAU_DATA.xlsx"
+stopifnot(
+  file.exists(excel_file)
 )
 
-# Vérification du chemin
-file_path
+# Import des tables ------------------------------------------------------
+
+legend <- read_sheet("LEGEND")
+
+pass <- read_sheet("PASS")
+
+avis <- read_sheet("AVIS")
+
+# Contrôle structure -----------------------------------------------------
+
+check_structure(legend)
 
 
-# Import de la table LEGEND ---------------------------------------------
+check_structure(pass)
 
-legend <- read_excel(
-  path = file_path,
-  sheet = "LEGEND"
-) |>
-  clean_names()
+check_structure(avis)
 
+# Contrôle des identifiants ---------------------------------------------
 
-# Vérification structure LEGEND -----------------------------------------
+check_id(pass, i_ddos)
 
-glimpse(legend)
-nrow(legend)
-names(legend)
+check_id(pass, idpat)
 
+check_id(avis, i_ddos)
 
-# Import de la table PASS -----------------------------------------------
-
-pass <- read_excel(
-  path = file_path,
-  sheet = "PASS"
-) |>
-  clean_names()
-
-
-# Vérification structure PASS -------------------------------------------
-
-glimpse(pass)
-nrow(pass)
-names(pass)
-
-
-# Vérification unicité des passages -------------------------------------
-
-pass |>
-  summarise(
-    n_lignes = n(),
-    n_iddos_uniques = n_distinct(i_ddos)
-  )
-
-# Résultat attendu : 1 ligne = 1 passage unique
-
-
-# Vérification unicité des patients -------------------------------------
-
-pass |>
-  summarise(
-    n_patients = n_distinct(idpat)
-  )
-
-
-# Import de la table AVIS -----------------------------------------------
-
-avis <- read_excel(
-  path = file_path,
-  sheet = "AVIS"
-) |>
-  clean_names()
-
-
-# Vérification structure AVIS -------------------------------------------
-
-glimpse(avis)
-nrow(avis)
-names(avis)
-
-
-# Vérification structure relationnelle AVIS -----------------------------
-
-avis |>
-  summarise(
-    n_lignes = n(),
-    n_iddos_uniques = n_distinct(i_ddos)
-  )
-
-# Résultat attendu : plusieurs avis possibles pour un même passage
-
-
-# Nombre d'avis par passage ---------------------------------------------
-
-avis |>
-  count(i_ddos, name = "n_avis") |>
-  arrange(desc(n_avis))
-
-
-# Vérification correspondance PASS / AVIS -------------------------------
+# Contrôle relationnel ---------------------------------------------------
 
 avis_sans_pass <- avis |>
   anti_join(
@@ -140,14 +69,46 @@ avis_sans_pass <- avis |>
 
 nrow(avis_sans_pass)
 
-# Résultat attendu :
-# 0 avis sans passage correspondant
+# Nombre d'avis par passage ---------------------------------------------
 
+avis |>
+  count(
+    i_ddos,
+    name = "n_avis"
+  ) |>
+  arrange(
+    desc(n_avis)
+  )
 
-# Résumé rapide des tables ----------------------------------------------
+# Sauvegarde -------------------------------------------------------------
 
-skim(pass)
-skim(avis)
+saveRDS(
+  legend,
+  here(
+    "data",
+    "interim",
+    "legend_raw.rds"
+  )
+)
 
-# Importation OK ! Etape suivante : nettoyage et préparation des données.
+saveRDS(
+  pass,
+  here(
+    "data",
+    "interim",
+    "pass_raw.rds"
+  )
+)
 
+saveRDS(
+  avis,
+  here(
+    "data",
+    "interim",
+    "avis_raw.rds"
+  )
+)
+
+message(
+  "Import terminé."
+)
