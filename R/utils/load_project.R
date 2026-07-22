@@ -1,0 +1,12 @@
+renv::activate()
+
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(skimr)
+library(janitor)
+library(naniar)
+library(here)
+
+source(here("R", "utils", "functions.R"))
+source(here("R", "utils", "themes.R"))
