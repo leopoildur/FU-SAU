@@ -1,125 +1,562 @@
 # ======================================================================
 # FU-SAU
-# 02.2 - Nettoyage de la table PASS
+# 02.2_cleaning_PASS.R
+# Nettoyage de la table PASS
 # ======================================================================
 
-# Chargement ============================================================
+# Objectif :
+#   - nettoyer les données issues de la table PASS
+#   - harmoniser les variables avec AVIS (mêmes noms, même logique)
+#   - nettoyer les variables spécifiques à PASS (RUM, destination)
+#   - contrôler la qualité des données
+#   - sauvegarder une table prête pour la fusion
+#
+# Entrée :
+#   data/interim/pass_raw.rds
+#
+# Sortie :
+#   data/processed/pass_clean.rds
+# ======================================================================
 
-source(here("R","utils","load_project.R"))
 
-source(here("R", "01_import.R"))
+# Chargement du projet ==================================================
+# Charger les packages, fonctions et constantes du projet.
+# Importer la table PASS brute.
 
-# Structure générale ============================================================
+source(here::here("R", "utils", "load_project.R"))
+
+pass <- readRDS(
+  here::here("data", "interim", "pass_raw.rds")
+)
+
+
+# Structure générale ====================================================
+# Décrire rapidement la table importée.
+
+## Dimensions ------------------------------------------------------------
 
 dim(pass)
 
+
+## Types des variables ---------------------------------------------------
+
 glimpse(pass)
+
+
+## Contrôle global -------------------------------------------------------
 
 skim(pass)
 
-colSums(is.na(pass))
 
-names(pass)
+# Identifiants ==========================================================
+# Renommer, convertir et contrôler les identifiants.
 
-# Identifiants ============================================================
+## Renommage -------------------------------------------------------------
 
 pass <- pass |>
   rename(
-
     id_patient = idpat,
     id_passage = i_ddos
-  ) |>
+  )
+
+
+## Conversion ------------------------------------------------------------
+
+pass <- pass |>
   mutate(
     id_patient = as.character(id_patient),
     id_passage = as.character(id_passage)
-
   )
 
-# Variables temporelles ============================================================
 
-# Renommer les variables ================================================
+## Contrôles -------------------------------------------------------------
+
+# Nombre de patients uniques
+pass |>
+  summarise(
+    n_patients = n_distinct(id_patient)
+  )
+
+# Nombre de passages uniques
+pass |>
+  summarise(
+    n_passages = n_distinct(id_passage)
+  )
+
+# Un passage ne doit correspondre qu'à un seul patient
+pass |>
+  distinct(id_passage, id_patient) |>
+  count(id_passage, name = "n_patients") |>
+  filter(n_patients > 1)
+
+# Un patient peut avoir plusieurs passages
+pass |>
+  count(id_patient, name = "n_passages") |>
+  arrange(desc(n_passages))
+
+
+## Doublons --------------------------------------------------------------
+
+sum(duplicated(pass))
+
+pass <- pass |>
+  distinct()
+
+sum(duplicated(pass))
+
+
+# Variables temporelles =================================================
+# Renommer, convertir et créer les variables temporelles.
+# PASS a deux dates d'avis : premier et dernier.
+
+## Renommage -------------------------------------------------------------
 
 pass <- pass |>
   rename(
-
-    date_arrivee = debu_tt,
-    date_sortie = fi_nt,
-    date_demande = de_mt,
+    date_arrivee      = debu_tt,
+    date_sortie       = fi_nt,
+    date_demande      = de_mt,
     date_premier_avis = avi_st_1,
     date_dernier_avis = avi_st_n
-
   )
 
+stopifnot(is.character(pass$date_arrivee))
 
-# Conversion des dates ==================================================
+
+## Conversion ------------------------------------------------------------
 
 pass <- pass |>
   mutate(
-
-    date_arrivee = parse_datetime_fr(date_arrivee),
-    date_sortie = parse_datetime_fr(date_sortie),
-    date_demande = parse_datetime_fr(date_demande),
+    date_arrivee      = parse_datetime_fr(date_arrivee),
+    date_sortie       = parse_datetime_fr(date_sortie),
+    date_demande      = parse_datetime_fr(date_demande),
     date_premier_avis = parse_datetime_fr(date_premier_avis),
     date_dernier_avis = parse_datetime_fr(date_dernier_avis)
-
   )
 
-# Variables dérivées ====================================================
+
+## Contrôle --------------------------------------------------------------
+
+pass |>
+  summarise(
+    across(
+      c(date_arrivee, date_sortie, date_demande, date_premier_avis, date_dernier_avis),
+      ~ sum(is.na(.))
+    )
+  )
+
+
+## Variables dérivées ----------------------------------------------------
 
 pass <- pass |>
   mutate(
 
-    # Heure
-    heure_arrivee = get_hour(date_arrivee),
-    heure_demande = get_hour(date_demande),
-    heure_premier_avis = get_hour(date_avis),
+    # Heure de la journée
+    heure_arrivee      = get_hour(date_arrivee),
+    heure_demande      = get_hour(date_demande),
+    heure_premier_avis = get_hour(date_premier_avis),
     heure_dernier_avis = get_hour(date_dernier_avis),
-    heure_sortie = get_hour(date_sortie),
+    heure_sortie       = get_hour(date_sortie),
 
-    # Nuit
-    nuit_arrivee = is_night(date_arrivee),
-    nuit_demande = is_night(date_demande),
-    nuit_premier_avis = is_night(date_avis),
+    # Passage de nuit
+    nuit_arrivee      = is_night(date_arrivee),
+    nuit_demande      = is_night(date_demande),
+    nuit_premier_avis = is_night(date_premier_avis),
     nuit_dernier_avis = is_night(date_dernier_avis),
-    nuit_sortie = is_night(date_sortie),
+    nuit_sortie       = is_night(date_sortie),
 
-    # Week-end
-    weekend_arrivee = is_weekend(date_arrivee),
-    weekend_demande = is_weekend(date_demande),
-    weekend_premier_avis = is_weekend(date_avis),
+    # Passage le week-end
+    weekend_arrivee      = is_weekend(date_arrivee),
+    weekend_demande      = is_weekend(date_demande),
+    weekend_premier_avis = is_weekend(date_premier_avis),
     weekend_dernier_avis = is_weekend(date_dernier_avis),
-    weekend_sortie = is_weekend(date_sortie),
+    weekend_sortie       = is_weekend(date_sortie),
 
-    # Jour férié
-    ferie = is_holiday(date_avis),
-
-    # Garde
-    garde =
-      nuit_premier_avis |
-      weekend_premier_avis |
-      ferie,
-
-    # Délais
-    delai_premier_avis = date_premier_avis - date_arrivee,
-    LOS = date_sortie - date_arrivee
+    # Jour de la semaine
+    jour_arrivee      = weekday_label(date_arrivee),
+    jour_premier_avis = weekday_label(date_premier_avis),
+    jour_sortie       = weekday_label(date_sortie)
 
   )
 
 
-# Variables démographiques ============================================================
+## Garde -----------------------------------------------------------------
+# Basée sur le premier avis (même logique que AVIS).
+
+pass <- pass |>
+  mutate(
+    ferie = is_holiday(date_premier_avis),
+    garde = nuit_premier_avis | weekend_premier_avis | ferie
+  )
+
+pass |>
+  count(garde, sort = TRUE)
 
 
-# Variables psychiatriques ============================================================
+## Délais ----------------------------------------------------------------
+
+pass <- pass |>
+  mutate(
+    delai_premier_avis = date_premier_avis - date_arrivee,
+    LOS                = date_sortie - date_arrivee
+  )
 
 
-# Variables organisationnelles ============================================================
+## Cohérence chronologique -----------------------------------------------
+
+pass |>
+  filter(date_sortie < date_arrivee)
+
+pass |>
+  filter(date_demande < date_arrivee)
+
+pass |>
+  filter(date_premier_avis < date_arrivee)
+
+pass |>
+  filter(date_premier_avis > date_sortie)
 
 
-# Variables spécifiques à PASS ============================================================
+## Résumé descriptif -----------------------------------------------------
+
+summary(as.numeric(pass$delai_premier_avis))
+
+summary(as.numeric(pass$LOS))
 
 
-# Contrôle qualité ============================================================
+# Variables démographiques ==============================================
+# Même traitement que AVIS.
+
+## Âge -------------------------------------------------------------------
+
+summary(pass$age)
 
 
-# Sauvegarde et export ============================================================
+## Sexe ------------------------------------------------------------------
 
+pass <- pass |>
+  mutate(
+    sexe = get_sexe_label(sexe)
+  )
+
+pass |>
+  count(sexe, sort = TRUE)
+
+
+## Code postal -----------------------------------------------------------
+
+pass <- pass |>
+  rename(code_postal = cp) |>
+  mutate(
+    code_postal = as.character(code_postal),
+    code_postal = stringr::str_pad(
+      code_postal,
+      width = 5,
+      side  = "left",
+      pad   = "0"
+    )
+  )
+
+
+## Département -----------------------------------------------------------
+
+pass <- pass |>
+  mutate(
+    departement = get_department(code_postal)
+  )
+
+pass |>
+  count(departement, sort = TRUE)
+
+
+## Contrôles -------------------------------------------------------------
+
+pass |>
+  filter(age < 15 | age > 110)
+
+pass |>
+  summarise(
+    across(
+      c(age, sexe, code_postal, departement),
+      ~ sum(is.na(.))
+    )
+  )
+
+
+# Variables psychiatriques (1er avis) ===================================
+# Les variables psychiatriques de PASS correspondent au premier avis.
+# On conserve les mêmes noms que dans AVIS pour faciliter la fusion.
+
+## Diagnostic principal --------------------------------------------------
+
+pass <- pass |>
+  rename(
+    diag_p   = dp_avis1,
+    nb_diag_a = n_das_avis1,
+    diag_a   = das_avis1
+  ) |>
+  mutate(
+    diag_p = stringr::str_trim(diag_p),
+    diag_p = stringr::str_to_upper(diag_p)
+  )
+
+pass |>
+  count(diag_p, sort = TRUE)
+
+
+## Niveaux CIM-10 du diagnostic principal --------------------------------
+
+pass <- pass |>
+  mutate(
+    diag_p_1 = stringr::str_sub(diag_p, 1, 1),
+    diag_p_2 = stringr::str_sub(diag_p, 1, 2),
+    diag_p_3 = stringr::str_sub(diag_p, 1, 3)
+  )
+
+
+## Diagnostics associés --------------------------------------------------
+
+pass <- pass |>
+  mutate(
+    diag_a = stringr::str_squish(diag_a),
+    diag_a = na_if(diag_a, ""),
+    diag_a = stringr::str_split(diag_a, pattern = "\\s+")
+  )
+
+pass$diag_a <- lapply(pass$diag_a, function(x) {
+  if (length(x) == 1 && is.na(x)) character(0) else x
+})
+
+pass <- pass |>
+  mutate(
+    diag_a_1 = lapply(diag_a, function(x) stringr::str_sub(x, 1, 1)),
+    diag_a_2 = lapply(diag_a, function(x) stringr::str_sub(x, 1, 2)),
+    diag_a_3 = lapply(diag_a, function(x) stringr::str_sub(x, 1, 3))
+  )
+
+
+## Diagnostics totaux (principal + associés) -----------------------------
+
+pass <- pass |>
+  mutate(
+    diag_t = purrr::map2(diag_p, diag_a, function(dp, das) unique(c(dp, das))),
+    diag_t_1 = lapply(diag_t, function(x) stringr::str_sub(x, 1, 1)),
+    diag_t_2 = lapply(diag_t, function(x) stringr::str_sub(x, 1, 2)),
+    diag_t_3 = lapply(diag_t, function(x) stringr::str_sub(x, 1, 3)),
+    nb_diag_t = lengths(diag_t)
+  )
+
+
+## Contrôles -------------------------------------------------------------
+
+pass |>
+  summarise(
+    across(c(diag_p, diag_a), ~ sum(is.na(.)))
+  )
+
+pass |>
+  filter(nchar(diag_p) < 3)
+
+pass |>
+  filter(!stringr::str_detect(diag_p, "^[A-Z]"))
+
+
+# Variables organisationnelles ==========================================
+# Même traitement que AVIS.
+
+## Mode légal de soins ---------------------------------------------------
+
+pass <- pass |>
+  mutate(
+    mls_f = get_mls_label(mls),
+    mls_g = case_when(
+      mls_f == "SL"                              ~ "SL",
+      mls_f %in% c("SPDT", "SPPI", "SPDRE")     ~ "SSC",
+      mls_f %in% c("OPP", "DETENUS", "PENAL")   ~ "AUTRES",
+      TRUE                                       ~ "INCONNU"
+    )
+  )
+
+pass |>
+  count(mls_f, sort = TRUE)
+
+pass |>
+  count(mls_g, sort = TRUE)
+
+
+## Secteur psychiatrique -------------------------------------------------
+
+pass <- pass |>
+  mutate(
+    secteur = stringr::str_squish(secteur),
+    secteur_f = dplyr::case_when(
+      stringr::str_detect(secteur, "SECTEUR\\s+[0-9]{2}$") ~
+        paste0("94G", stringr::str_extract(secteur, "[0-9]{2}$")),
+      stringr::str_detect(secteur, "IDF") ~ "IDF hors 94",
+      TRUE ~ "Hors IDF"
+    ),
+    hopital_secteur = case_when(
+      secteur_f %in% c("94G01", "94G02", "94G03", "94G04", "94G05") ~ "MUR",
+      secteur_f %in% c("94G06", "94G07", "94G08")                   ~ "ACH",
+      secteur_f == "94G09"                                           ~ "VSG",
+      secteur_f %in% c("94G10", "94G11", "94G13", "94G15", "94G17") ~ "PGV",
+      secteur_f == "94G12"                                           ~ "PBV",
+      secteur_f == "94G16"                                           ~ "HSM",
+      TRUE                                                           ~ "AUTRES"
+    )
+  )
+
+pass |>
+  count(secteur_f, sort = TRUE)
+
+pass |>
+  count(hopital_secteur, sort = TRUE)
+
+
+# Variables spécifiques à PASS ==========================================
+# Ces variables n'existent pas dans AVIS.
+
+## Type de séjour --------------------------------------------------------
+# 9 = sans hospitalisation, 11 = avec hospitalisation.
+
+pass <- pass |>
+  mutate(
+    type_sejour_f = case_when(
+      type_sejour == "9"  ~ "SANS_HOSPIT",
+      type_sejour == "11" ~ "AVEC_HOSPIT",
+      TRUE                ~ "INCONNU"
+    )
+  )
+
+pass |>
+  count(type_sejour_f, sort = TRUE)
+
+
+## Nombre d'avis par passage ---------------------------------------------
+
+pass <- pass |>
+  rename(nb_avis = nb_avis) |>
+  mutate(
+    nb_avis = as.integer(nb_avis),
+    passage_multiple = nb_avis > 1
+  )
+
+pass |>
+  count(nb_avis, sort = TRUE)
+
+pass |>
+  count(passage_multiple)
+
+
+## RUM (Résumé d'Unité Médicale) -----------------------------------------
+# Présent uniquement pour les passages avec hospitalisation.
+
+pass <- pass |>
+  rename(
+    date_entree_rum = de_rt,
+    date_sortie_rum = ds_rt
+  ) |>
+  mutate(
+    date_entree_rum = parse_datetime_fr(date_entree_rum),
+    date_sortie_rum = parse_datetime_fr(date_sortie_rum)
+  )
+
+# Nettoyage du diagnostic principal RUM
+pass <- pass |>
+  mutate(
+    dp_rum = stringr::str_trim(dp_rum),
+    dp_rum = stringr::str_to_upper(dp_rum)
+  )
+
+pass |>
+  count(dp_rum, sort = TRUE) |>
+  head(15)
+
+pass |>
+  count(um_rum, sort = TRUE)
+
+summary(pass$duree_rum_urg)
+
+
+## Destination de sortie -------------------------------------------------
+# Recodage de SORT_LONGTEXT en catégories analytiques.
+
+pass <- pass |>
+  mutate(
+    destination = get_destination_label(sort_longtext)
+  )
+
+pass |>
+  count(destination, sort = TRUE)
+
+# Correspondance avec les libellés bruts
+pass |>
+  count(sort_longtext, destination, sort = TRUE)
+
+
+## Mode d'entrée et de sortie de l'hospitalisation ----------------------
+# Nettoyage des espaces parasites dans MES et MSS.
+
+pass <- pass |>
+  rename(
+    mode_entree = mes,
+    mode_sortie = mss
+  ) |>
+  mutate(
+    mode_entree = stringr::str_squish(mode_entree),
+    mode_sortie = stringr::str_squish(mode_sortie)
+  )
+
+pass |>
+  count(mode_entree, sort = TRUE)
+
+pass |>
+  count(mode_sortie, sort = TRUE)
+
+
+# Contrôle qualité ======================================================
+# Résumé final de la table nettoyée.
+
+skim(pass)
+
+pass |>
+  summarise(
+    across(
+      everything(),
+      ~ sum(is.na(.))
+    )
+  ) |>
+  tidyr::pivot_longer(
+    everything(),
+    names_to  = "variable",
+    values_to = "n_na"
+  ) |>
+  filter(n_na > 0) |>
+  arrange(desc(n_na))
+
+
+# Sauvegarde ============================================================
+
+dir.create(
+  here::here("data", "processed"),
+  recursive    = TRUE,
+  showWarnings = FALSE
+)
+
+saveRDS(
+  pass,
+  here::here("data", "processed", "pass_clean.rds")
+)
+
+
+# Fin du script =========================================================
+
+gitmessage("======================================================")
+message(" Nettoyage de la table PASS terminé avec succès")
+message("------------------------------------------------------")
+message(" Nombre de lignes   : ", nrow(pass))
+message(" Nombre de variables: ", ncol(pass))
+message(" Nombre de patients : ", n_distinct(pass$id_patient))
+message(" Nombre de passages : ", n_distinct(pass$id_passage))
+message(" Fichier sauvegardé : data/processed/pass_clean.rds")
+message("======================================================")

@@ -2,8 +2,9 @@ mls_dictionary <- c(
 
   "1" = "SL",
   "3" = "SPDRE",
-  "4" = "122-1",
+  "4" = "PENAL",
   "5" = "OPP",
+  "6" = "DETENUS",
   "7" = "SPDT",
   "8" = "SPPI"
 

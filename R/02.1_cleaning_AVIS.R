@@ -781,27 +781,7 @@ avis |>
 
 avis <- avis |>
   mutate(
-
-    mls_f = case_when(
-
-      mls == "1" ~ "SL",
-
-      mls == "3" ~ "SPDRE",
-
-      mls == "4" ~ "PENAL",
-
-      mls == "5" ~ "OPP",
-
-      mls == "6" ~ "DETENUS",
-
-      mls == "7" ~ "SPDT",
-
-      mls == "8" ~ "SPPI",
-
-      TRUE ~ "INCONNU"
-
-    )
-
+    mls_f = get_mls_label(mls)
   )
 
 # Regroupement du mode légal de soins ===================================

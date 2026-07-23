@@ -8,5 +8,8 @@ library(janitor)
 library(naniar)
 library(here)
 
+source(here("R", "utils", "constants.R"))
+source(here("R", "utils", "dictionaries.R"))
 source(here("R", "utils", "functions.R"))
+source(here("R", "utils", "checks.R"))
 source(here("R", "utils", "themes.R"))

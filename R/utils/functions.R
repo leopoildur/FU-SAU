@@ -191,6 +191,30 @@ get_sexe_label <- function(x) {
 
 }
 
+# Destination de sortie
+get_destination_label <- function(x) {
+  
+  dplyr::case_when(
+    
+    stringr::str_detect(x, "(?i)retour a domicile") ~ "DOMICILE",
+    
+    stringr::str_detect(x, "(?i)transfert vers psy") | stringr::str_detect(x, "(?i)transfert vers une unite psy") ~ "TRANSFERT_PSY",
+    
+    stringr::str_detect(x, "(?i)transfert vers mco") | stringr::str_detect(x, "(?i)transfert vers ssr") | stringr::str_detect(x, "(?i)transfert vers sld") | stringr::str_detect(x, "(?i)transfert vers une unite ssr") | stringr::str_detect(x, "(?i)transfert vers une unite sld") ~ "TRANSFERT_MCO",
+    
+    stringr::str_detect(x, "(?i)non admis") ~ "NON_ADMIS",
+    
+    TRUE ~ "AUTRE"
+    
+  )
+  
+}
+
+# Message stylisé
+gitmessage <- function(...) {
+  message(paste0(...))
+}
+
 # Sauvegarder un graphique (PDF + PNG)
 
 save_plot <- function(
