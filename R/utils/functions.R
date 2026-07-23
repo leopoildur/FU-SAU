@@ -215,6 +215,20 @@ gitmessage <- function(...) {
   message(paste0(...))
 }
 
+# Calcul du nombre d'événements dans une fenêtre glissante
+count_events_in_rolling_window <- function(dates, window_days = 365) {
+  n <- length(dates)
+  if (n == 0) return(numeric(0))
+  
+  counts <- numeric(n)
+  for (i in 1:n) {
+    current_date <- dates[i]
+    window_start <- current_date - lubridate::days(window_days)
+    counts[i] <- sum(dates >= window_start & dates <= current_date)
+  }
+  return(counts)
+}
+
 # Sauvegarder un graphique (PDF + PNG)
 
 save_plot <- function(

@@ -5,13 +5,9 @@
 # ======================================================================
 
 # Objectif :
-#   - Construire la table analytique principale
-#   - Unité statistique : le patient (1 ligne = 1 patient)
-#   - Agréger les passages depuis PASS
-#   - Récupérer les diagnostics du 1er et du dernier avis de chaque passage
-#     depuis AVIS
-#   - Calculer les variables de récurrence
-#   - Définir les frequent attenders (>= 4 passages sur 12 mois glissants)
+#   - Construire la table analytique principale au niveau patient.
+#   - Inclure un module complet 'Frequent Users' avec diverses définitions.
+#   - Calculer des variables analytiques numériques pour les analyses statistiques.
 #
 # Entrée :
 #   data/processed/avis_clean.rds
@@ -19,6 +15,7 @@
 #
 # Sortie :
 #   data/processed/cohort.rds
+#   outputs/tables/frequent_users_contribution.csv
 # ======================================================================
 
 
@@ -60,44 +57,45 @@ avis |>
 
 
 # Diagnostics du 1er et du dernier avis par passage (depuis AVIS) =======
-# Pour chaque passage, on récupère le diagnostic principal et les
-# diagnostics associés du 1er avis et du dernier avis.
-# Le tri par date_avis garantit l'ordre chronologique.
 
 diag_par_passage <- avis |>
   arrange(id_passage, date_avis) |>
   group_by(id_passage) |>
   summarise(
-
-    # Premier avis du passage
     diag_p_premier_avis   = first(diag_p),
     diag_p_2_premier_avis = first(diag_p_2),
     diag_a_premier_avis   = list(first(diag_a)),
-
-    # Dernier avis du passage
     diag_p_dernier_avis   = last(diag_p),
     diag_p_2_dernier_avis = last(diag_p_2),
     diag_a_dernier_avis   = list(last(diag_a)),
-
-    # Nombre réel d'avis dans AVIS pour ce passage
     n_avis_avis = n()
-
   ) |>
   ungroup()
 
 
 # Enrichissement de PASS avec les diagnostics AVIS ======================
-# Les passages sans correspondance dans AVIS conservent les diagnostics
-# déjà présents dans PASS (1er avis).
 
 pass_enrichi <- pass |>
   left_join(diag_par_passage, by = "id_passage")
 
 
+# Calcul des métriques de recours par patient (avant agrégation) ========
+# Nécessaire pour les fenêtres glissantes.
+
+pass_pre_cohort <- pass_enrichi |>
+  arrange(id_patient, date_arrivee) |>
+  group_by(id_patient) |>
+  mutate(
+    # Nombre de passages dans les 365 jours précédents pour chaque passage
+    nb_passages_365j_glissant = count_events_in_rolling_window(date_arrivee, 365)
+  ) |>
+  ungroup()
+
+
 # Agrégation au niveau patient ==========================================
 # 1 ligne = 1 patient.
 
-cohort <- pass_enrichi |>
+cohort <- pass_pre_cohort |>
   arrange(id_patient, date_arrivee) |>
   group_by(id_patient) |>
   summarise(
@@ -112,16 +110,18 @@ cohort <- pass_enrichi |>
     departement         = first(departement),
 
     # ------------------------------------------------------------------
-    # Récurrence des passages
+    # Métriques de recours globales
     # ------------------------------------------------------------------
 
-    nb_passages          = n(),
+    nb_passages_total    = n(),
+    nb_avis_total        = sum(nb_avis, na.rm = TRUE),
+    nb_hospitalisations  = sum(type_sejour_f == "AVEC_HOSPIT", na.rm = TRUE),
     date_premier_passage = first(date_arrivee),
     date_dernier_passage = last(date_arrivee),
-
-    duree_suivi_jours = as.numeric(
+    duree_suivi_jours    = as.numeric(
       difftime(last(date_arrivee), first(date_arrivee), units = "days")
     ),
+    frequence_passages_par_an = nb_passages_total / (duree_suivi_jours / 365.25),
 
     # ------------------------------------------------------------------
     # Diagnostics du premier passage (1er et dernier avis)
@@ -149,12 +149,6 @@ cohort <- pass_enrichi |>
     hopital_secteur_premier = first(hopital_secteur),
 
     # ------------------------------------------------------------------
-    # Hospitalisations
-    # ------------------------------------------------------------------
-
-    nb_passages_hospit = sum(type_sejour_f == "AVEC_HOSPIT", na.rm = TRUE),
-
-    # ------------------------------------------------------------------
     # Destinations de sortie (tous passages)
     # ------------------------------------------------------------------
 
@@ -171,35 +165,42 @@ cohort <- pass_enrichi |>
     mls_g_premier = first(mls_g),
 
     # ------------------------------------------------------------------
-    # Définition des frequent attenders
-    # >= 4 passages sur une fenêtre glissante de 365 jours.
-    # On compare la date du passage n avec la date du passage n-3.
+    # Module "Frequent Users" - Définitions fixes (fenêtre glissante)
     # ------------------------------------------------------------------
 
-    frequent_attender = {
-      dates <- date_arrivee
-      n <- length(dates)
-      if (n >= 4) {
-        any(
-          as.numeric(
-            difftime(dates[4:n], dates[1:(n - 3)], units = "days")
-          ) <= 365
-        )
-      } else {
-        FALSE
-      }
-    }
+    nb_passages_365j_max = max(nb_passages_365j_glissant, na.rm = TRUE),
+    FU_n_2 = any(nb_passages_365j_glissant >= 2, na.rm = TRUE),
+    FU_n_3 = any(nb_passages_365j_glissant >= 3, na.rm = TRUE),
+    FU_n_4 = any(nb_passages_365j_glissant >= 4, na.rm = TRUE),
+    FU_n_5 = any(nb_passages_365j_glissant >= 5, na.rm = TRUE),
+    FU_n_10 = any(nb_passages_365j_glissant >= 10, na.rm = TRUE)
 
   ) |>
   ungroup()
 
 
-# Variables dérivées ====================================================
+# Module "Frequent Users" - Définitions par percentiles =================
+
+# Calcul des percentiles sur le nombre total de passages
+quantiles_total <- quantile(cohort$nb_passages_total, probs = c(0.8, 0.9, 0.95, 0.99), na.rm = TRUE)
 
 cohort <- cohort |>
   mutate(
-    taux_hospit           = nb_passages_hospit / nb_passages,
-    annee_premier_passage = lubridate::year(date_premier_passage)
+    FU_top_20_total = nb_passages_total >= quantiles_total["80%"],
+    FU_top_10_total = nb_passages_total >= quantiles_total["90%"],
+    FU_top_5_total  = nb_passages_total >= quantiles_total["95%"],
+    FU_top_1_total  = nb_passages_total >= quantiles_total["99%"]
+  )
+
+# Calcul des percentiles sur le nombre maximal de passages en 365 jours
+quantiles_365j_max <- quantile(cohort$nb_passages_365j_max, probs = c(0.8, 0.9, 0.95, 0.99), na.rm = TRUE)
+
+cohort <- cohort |>
+  mutate(
+    FU_top_20_365j_max = nb_passages_365j_max >= quantiles_365j_max["80%"],
+    FU_top_10_365j_max = nb_passages_365j_max >= quantiles_365j_max["90%"],
+    FU_top_5_365j_max  = nb_passages_365j_max >= quantiles_365j_max["95%"],
+    FU_top_1_365j_max  = nb_passages_365j_max >= quantiles_365j_max["99%"]
   )
 
 
@@ -208,7 +209,16 @@ cohort <- cohort |>
 dim(cohort)
 
 cohort |>
-  count(frequent_attender)
+  count(nb_passages_total, sort = TRUE)
+
+cohort |>
+  count(nb_passages_365j_max, sort = TRUE)
+
+cohort |>
+  count(FU_n_4)
+
+cohort |>
+  count(FU_top_5_total)
 
 cohort |>
   summarise(
@@ -222,13 +232,67 @@ cohort |>
   filter(n_na > 0) |>
   arrange(desc(n_na))
 
-summary(cohort$nb_passages)
 
-cohort |>
-  count(nb_passages, sort = TRUE)
+# Génération de la table de contribution à l'activité ===================
+
+# Définitions des FU à évaluer
+fu_definitions <- list(
+  "FU_n_3" = quote(FU_n_3),
+  "FU_n_4" = quote(FU_n_4),
+  "FU_n_5" = quote(FU_n_5),
+  "FU_top_1_total" = quote(FU_top_1_total),
+  "FU_top_5_total" = quote(FU_top_5_total),
+  "FU_top_1_365j_max" = quote(FU_top_1_365j_max),
+  "FU_top_5_365j_max" = quote(FU_top_5_365j_max)
+)
+
+contribution_table <- tibble(
+  Definition = character(),
+  Patients = numeric(),
+  `% Patients` = character(),
+  Passages = numeric(),
+  `% Activité Passages` = character(),
+  `Avis Psychiatriques` = numeric(),
+  `% Activité Avis` = character()
+)
+
+total_patients <- nrow(cohort)
+total_passages <- sum(cohort$nb_passages_total, na.rm = TRUE)
+total_avis     <- sum(cohort$nb_avis_total, na.rm = TRUE)
+
+for (def_name in names(fu_definitions)) {
+  def_expr <- fu_definitions[[def_name]]
+  
+  fu_cohort <- cohort |>
+    filter(!!def_expr)
+  
+  n_fu_patients <- nrow(fu_cohort)
+  prop_fu_patients <- n_fu_patients / total_patients
+  
+  n_fu_passages <- sum(fu_cohort$nb_passages_total, na.rm = TRUE)
+  prop_fu_passages <- n_fu_passages / total_passages
+  
+  n_fu_avis <- sum(fu_cohort$nb_avis_total, na.rm = TRUE)
+  prop_fu_avis <- n_fu_avis / total_avis
+  
+  contribution_table <- contribution_table |>
+    add_row(
+      Definition = def_name,
+      Patients = n_fu_patients,
+      `% Patients` = scales::percent(prop_fu_patients, accuracy = 0.1),
+      Passages = n_fu_passages,
+      `% Activité Passages` = scales::percent(prop_fu_passages, accuracy = 0.1),
+      `Avis Psychiatriques` = n_fu_avis,
+      `% Activité Avis` = scales::percent(prop_fu_avis, accuracy = 0.1)
+    )
+}
+
+# Sauvegarde de la table de contribution
+dir.create(here::here("outputs", "tables"), recursive = TRUE, showWarnings = FALSE)
+write_csv(contribution_table, here::here("outputs", "tables", "frequent_users_contribution.csv"))
 
 
-# Sauvegarde ============================================================
+# Sauvegarde de la cohorte finale =======================================
 
 dir.create(
   here::here("data", "processed"),
@@ -249,6 +313,7 @@ message(" Création de la cohorte patient terminée avec succès")
 message("------------------------------------------------------")
 message(" Nombre de patients (lignes) : ", nrow(cohort))
 message(" Nombre de variables         : ", ncol(cohort))
-message(" Frequent attenders          : ", sum(cohort$frequent_attender, na.rm = TRUE))
+message(" Frequent attenders (FU_n_4) : ", sum(cohort$FU_n_4, na.rm = TRUE))
 message(" Fichier sauvegardé          : data/processed/cohort.rds")
+message(" Table de contribution FU    : outputs/tables/frequent_users_contribution.csv")
 message("======================================================")
