@@ -493,6 +493,32 @@ pass |>
 pass |>
   count(sort_longtext, destination, sort = TRUE)
 
+# ----------------------------------------------------------------------
+# Orientation finale
+# ----------------------------------------------------------------------
+
+pass <- pass |>
+
+  mutate(
+
+    orientation_finale = case_when(
+
+      sort_longtext %in% c(
+
+        "a - transfert vers psy d'un autre hopital",
+        "a - transfert vers une unite psy du meme hopital",
+        "ut1 - transfert - absence de lit",
+        "ut2 - transfert - absence de la specialite",
+        "ut4 - transfert - volonte du patient",
+        "ut5 - transfert - hors de la circonscription"
+
+      ) ~ "HOSPIT_PSY",
+
+      TRUE ~ "NON_ADMIS"
+
+    )
+
+  )
 
 ## Mode d'entrée et de sortie de l'hospitalisation ----------------------
 # Nettoyage des espaces parasites dans MES et MSS.
