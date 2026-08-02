@@ -21,6 +21,7 @@ packages <- c(
   "lubridate",
   "naniar",
   "gtsummary",
+  "ggplot2",
   "gt",
   "timeDate"
 )
