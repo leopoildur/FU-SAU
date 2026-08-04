@@ -261,26 +261,219 @@ message(
 # 4. Construction de la cohorte patient
 # ======================================================================
 
+# ----------------------------------------------------------------------
+# 4.1 Création de la cohorte
+# ----------------------------------------------------------------------
+#
+# Objectif : Créer une table contenant une ligne par patient.
+# Entrée   : pass_enrichi (1 ligne = 1 passage)
+# Sortie   : cohort (1 ligne = 1 patient)
+# Unité    : 1 ligne = 1 patient
+
+cohort <-
+
+  pass_enrichi |>
+
+  distinct(
+    id_patient
+  )
+
+
+
+# ----------------------------------------------------------------------
+# 4.2 Contrôle qualité
+# ----------------------------------------------------------------------
+#
+# Objectif : Vérifier que la cohorte contient une ligne par patient.
+# Entrée   : cohort
+# Sortie   : Messages de contrôle
+# Unité    : 1 ligne = 1 patient
+
+stopifnot(
+
+  nrow(cohort) ==
+
+    dplyr::n_distinct(pass_enrichi$id_patient)
+
+)
+
+message(
+  "Nombre de patients : ",
+  nrow(cohort)
+)
+
 
 # ======================================================================
 # 5. Variables démographiques
 # ======================================================================
-# Pourquoi     : 
-# Entrée       : 
-# Sortie       : 
-# Objet créé   : 
-# Unité statistique : 
+
+# ----------------------------------------------------------------------
+# 5.1 Création des variables démographiques
+# ----------------------------------------------------------------------
+#
+# Objectif : Résumer les caractéristiques démographiques de chaque patient.
+# Entrée   : pass_enrichi (1 ligne = 1 passage)
+# Sortie   : cohort enrichie
+# Unité    : 1 ligne = 1 patient
+
+cohort_demo <-
+
+  pass_enrichi |>
+
+  arrange(
+    id_patient,
+    date_arrivee
+  ) |>
+
+  group_by(
+    id_patient
+  ) |>
+
+  summarise(
+
+    sexe =
+      first(sexe),
+
+    age =
+      first(age),
+
+    code_postal =
+      first(code_postal),
+
+    departement =
+      first(departement),
+
+    secteur_94 =
+    first(secteur_94),
+
+    secteur_f =
+    first(secteur_f),
+
+    hopital_secteur =
+    first(hopital_secteur),
+
+    .groups = "drop"
+
+  )
+
+cohort <-
+
+  cohort |>
+
+  left_join(
+
+    cohort_demo,
+
+    by = "id_patient"
+
+  )
+
+
+
+# ----------------------------------------------------------------------
+# 5.2 Contrôle qualité
+# ----------------------------------------------------------------------
+#
+# Objectif : Vérifier les variables démographiques.
+# Entrée   : cohort
+# Sortie   : Messages de contrôle
+# Unité    : 1 ligne = 1 patient
+
+stopifnot(
+
+  nrow(cohort) ==
+
+    nrow(cohort_demo)
+
+)
+
+message(
+  "Variables démographiques ajoutées."
+)
 
 
 # ======================================================================
 # 6. Variables de recours aux urgences
 # ======================================================================
-# Pourquoi     : 
-# Entrée       : 
-# Sortie       : 
-# Objet créé   : 
-# Unité statistique : 
 
+# ----------------------------------------------------------------------
+# 6.1 Création des variables de recours
+# ----------------------------------------------------------------------
+# Objectif : Résumer le recours aux urgences de chaque patient.
+# Entrée   : pass_enrichi (1 ligne = 1 passage)
+# Sortie   : cohort enrichie
+# Unité    : 1 ligne = 1 patient
+
+cohort_recours <-
+
+  pass_enrichi |>
+
+  group_by(
+    id_patient
+  ) |>
+
+  summarise(
+
+    # Suivi
+
+    premier_passage =
+      min(date_arrivee),
+
+    dernier_passage =
+      max(date_arrivee),
+
+    duree_suivi_jours =
+      as.numeric(
+        max(date_arrivee) -
+          min(date_arrivee),
+        units = "days"
+      ),
+
+    # Activité
+
+    nb_passages =
+      n(),
+
+    nb_avis =
+      sum(nb_avis, na.rm = TRUE),
+
+    .groups =
+      "drop"
+
+  )
+
+cohort <-
+
+  cohort |>
+
+  left_join(
+
+    cohort_recours,
+
+    by = "id_patient"
+
+  )
+
+# ----------------------------------------------------------------------
+# 6.2 Contrôle qualité
+# ----------------------------------------------------------------------
+#
+# Objectif : Vérifier les variables de recours.
+# Entrée   : cohort
+# Sortie   : Messages de contrôle
+# Unité    : 1 ligne = 1 patient
+
+stopifnot(
+
+  nrow(cohort) ==
+
+    nrow(cohort_recours)
+
+)
+
+message(
+  "Variables de recours ajoutées."
+)
 
 # ======================================================================
 # 7. Variables psychiatriques

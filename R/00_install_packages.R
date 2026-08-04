@@ -4,12 +4,6 @@
 # - lors de la création du projet ;
 # - lorsqu'un nouveau package est ajouté.
 
-# Installation de renv --------------------------------------------------
-
-if (!requireNamespace("renv", quietly = TRUE)) {
-  install.packages("renv")
-}
-
 # Packages du projet ----------------------------------------------------
 
 packages <- c(
@@ -23,11 +17,7 @@ packages <- c(
   "gtsummary",
   "ggplot2",
   "gt",
+  "slider",
   "timeDate"
 )
-
-renv::install(packages)
-
-# Mise à jour du lockfile ------------------------------------------------
-
-renv::snapshot()
+install.packages(setdiff(packages, rownames(installed.packages())))

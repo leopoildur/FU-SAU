@@ -386,50 +386,134 @@ pass |>
 
 ## Secteur psychiatrique -------------------------------------------------
 
-pass <- pass |>
+pass <-
+
+  pass |>
+
+  left_join(
+    dictionnaire_secteurs,
+    by = "code_postal"
+  ) |>
+
   mutate(
-    secteur = stringr::str_squish(secteur),
-    secteur_f = dplyr::case_when(
-      stringr::str_detect(secteur, "SECTEUR\\s+[0-9]{2}$") ~
-        paste0("94G", stringr::str_extract(secteur, "[0-9]{2}$")),
-      stringr::str_detect(secteur, "IDF") ~ "IDF hors 94",
-      TRUE ~ "Hors IDF"
+
+    departement = substr(code_postal, 1, 2),
+
+    # Secteur psychiatrique détaillé -----------------------------------
+
+    secteur_f = case_when(
+
+      !is.na(secteur_f) ~ secteur_f,
+
+      departement %in% c(
+        "75", "77", "78", "91", "92", "93", "95"
+      ) ~ "IDF_HORS_94",
+
+      TRUE ~ "HORS_IDF"
+
     ),
+
+    # Établissement support --------------------------------------------
+
     hopital_secteur = case_when(
-      secteur_f %in% c("94G01", "94G02", "94G03", "94G04", "94G05") ~ "MUR",
-      secteur_f %in% c("94G06", "94G07", "94G08")                   ~ "ACH",
-      secteur_f == "94G09"                                           ~ "VSG",
-      secteur_f %in% c("94G10", "94G11", "94G13", "94G15", "94G17") ~ "PGV",
-      secteur_f == "94G12"                                           ~ "PBV",
-      secteur_f == "94G16"                                           ~ "HSM",
-      TRUE                                                           ~ "AUTRES"
+
+      !is.na(hopital_secteur) ~ hopital_secteur,
+
+      TRUE ~ "AUTRES"
+
+    ),
+
+    # Variable simplifiée pour les analyses ----------------------------
+
+    secteur_94 = case_when(
+
+      stringr::str_starts(secteur_f, "94G") ~ secteur_f,
+
+      TRUE ~ "HORS_94"
+
     )
+
   )
 
-pass |>
-  count(secteur_f, sort = TRUE)
+patients_changement_secteur <-
+
+  pass |>
+
+  group_by(id_patient) |>
+
+  summarise(
+
+    n_secteurs =
+      n_distinct(secteur_f),
+
+    .groups = "drop"
+
+  )
+
+patients_changement_secteur |>
+
+  count(
+    n_secteurs
+  )
+
+# Le secteur psychiatrique de résidence est resté identique pour 98,1 % des patients au cours du suivi. 
+# Les changements de secteur (1,9 %) ont été considérés comme négligeables ; 
+# les variables de sectorisation retenues dans la cohorte correspondent donc au secteur du premier passage.
+
+# Contrôle qualité ------------------------------------------------------
+
+message("\nSecteur détaillé :")
 
 pass |>
-  count(hopital_secteur, sort = TRUE)
 
+  count(
+    secteur_f,
+    sort = TRUE
+  ) |>
+
+  print(n = Inf)
+
+
+message("\nSecteur simplifié :")
+
+pass |>
+
+  count(
+    secteur_94,
+    sort = TRUE
+  ) |>
+
+  print(n = Inf)
+
+
+message("\nÉtablissement support :")
+
+pass |>
+
+  count(
+    hopital_secteur,
+    sort = TRUE
+  ) |>
+
+  print(n = Inf)
 
 # Variables spécifiques à PASS ==========================================
 # Ces variables n'existent pas dans AVIS.
 
-## Type de séjour --------------------------------------------------------
-# 9 = sans hospitalisation, 11 = avec hospitalisation.
+# ## Type de séjour --------------------------------------------------------
+# # 9 = sans hospitalisation, 11 = avec hospitalisation.
 
-pass <- pass |>
-  mutate(
-    type_sejour_f = case_when(
-      type_sejour == "9"  ~ "SANS_HOSPIT",
-      type_sejour == "11" ~ "AVEC_HOSPIT",
-      TRUE                ~ "INCONNU"
-    )
-  )
+# pass <- pass |>
+#   mutate(
+#     type_sejour_f = case_when(
+#       type_sejour == "9"  ~ "SANS_HOSPIT",
+#       type_sejour == "11" ~ "AVEC_HOSPIT",
+#       TRUE                ~ "INCONNU"
+#     )
+#   )
 
-pass |>
-  count(type_sejour_f, sort = TRUE)
+# pass |>
+#   count(type_sejour_f, sort = TRUE)
 
 
 ## Nombre d'avis par passage ---------------------------------------------
@@ -448,34 +532,34 @@ pass |>
   count(passage_multiple)
 
 
-## RUM (Résumé d'Unité Médicale) -----------------------------------------
-# Présent uniquement pour les passages avec hospitalisation.
+# ## RUM (Résumé d'Unité Médicale) -----------------------------------------
+# # Présent uniquement pour les passages avec hospitalisation.
 
-pass <- pass |>
-  rename(
-    date_entree_rum = de_rt,
-    date_sortie_rum = ds_rt
-  ) |>
-  mutate(
-    date_entree_rum = parse_datetime_fr(date_entree_rum),
-    date_sortie_rum = parse_datetime_fr(date_sortie_rum)
-  )
+# pass <- pass |>
+#   rename(
+#     date_entree_rum = de_rt,
+#     date_sortie_rum = ds_rt
+#   ) |>
+#   mutate(
+#     date_entree_rum = parse_datetime_fr(date_entree_rum),
+#     date_sortie_rum = parse_datetime_fr(date_sortie_rum)
+#   )
 
-# Nettoyage du diagnostic principal RUM
-pass <- pass |>
-  mutate(
-    dp_rum = stringr::str_trim(dp_rum),
-    dp_rum = stringr::str_to_upper(dp_rum)
-  )
+# # Nettoyage du diagnostic principal RUM
+# pass <- pass |>
+#   mutate(
+#     dp_rum = stringr::str_trim(dp_rum),
+#     dp_rum = stringr::str_to_upper(dp_rum)
+#   )
 
-pass |>
-  count(dp_rum, sort = TRUE) |>
-  head(15)
+# pass |>
+#   count(dp_rum, sort = TRUE) |>
+#   head(15)
 
-pass |>
-  count(um_rum, sort = TRUE)
+# pass |>
+#   count(um_rum, sort = TRUE)
 
-summary(pass$duree_rum_urg)
+# summary(pass$duree_rum_urg)
 
 
 ## Destination de sortie -------------------------------------------------

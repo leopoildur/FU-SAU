@@ -1,5 +1,3 @@
-renv::activate()
-
 library(tidyverse)
 library(lubridate)
 library(stringr)

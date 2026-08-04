@@ -82,6 +82,8 @@ avis |>
 
 # Sauvegarde -------------------------------------------------------------
 
+fs::dir_create(here::here("data", "interim"))
+
 saveRDS(
   legend,
   here(
