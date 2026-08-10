@@ -796,16 +796,11 @@ avis <- avis |>
       mls_f %in% c(
         "SPDT",
         "SPPI",
-        "SPDRE"
-      ) ~ "SSC",
-
-      mls_f %in% c(
+        "SPDRE",
         "OPP",
         "DETENUS",
         "PENAL"
-      ) ~ "AUTRES",
-
-      TRUE ~ "INCONNU"
+      ) ~ "SSC",
 
     )
 

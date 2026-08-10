@@ -478,54 +478,536 @@ message(
 # ======================================================================
 # 7. Variables psychiatriques
 # ======================================================================
-# Pourquoi     : 
-# Entrée       : 
-# Sortie       : 
-# Objet créé   : 
-# Unité statistique : 
-# Diagnostics
+# ----------------------------------------------------------------------
+# 7.1 Agrégation des diagnostics au niveau patient
+# ----------------------------------------------------------------------
 #
-# Classes CIM-10
-# Nombre de diagnostics
-# Diagnostic majoritaire
-# Pondération diagnostique
+# Objectif : Agréger l'ensemble des informations diagnostiques de chaque
+#            patient avant le codage selon les méthodes de Schmoll et
+#            Fleury.
 #
+# Entrée   : pass_enrichi (1 ligne = 1 passage)
+# Sortie   : cohort_diag (1 ligne = 1 patient)
+# Unité    : 1 ligne = 1 patient
 
+cohort_diag <-
 
+  pass_enrichi |>
 
-# ======================================================================
-# 8. Variables organisationnelles
-# ======================================================================
-# Pourquoi     : 
-# Entrée       : 
-# Sortie       : 
-# Objet créé   : 
-# Unité statistique : 
+  arrange(
+    id_patient,
+    date_arrivee
+  ) |>
+
+  group_by(
+    id_patient
+  ) |>
+
+  summarise(
+
+    # Diagnostics principaux du dernier avis de chaque passage
+
+    diag_p_2_passages =
+      list(
+        diag_p_2_dernier_avis
+      ),
+
+    # Ensemble des diagnostics rencontrés
+    # (tous les diagnostics associés de tous les passages)
+
+    diag_t_2_patient =
+      list(
+
+        unique(
+
+          unlist(
+            diag_t_2_passage
+          )
+
+        )
+
+      ),
+
+    .groups =
+      "drop"
+
+  )
+
+# ----------------------------------------------------------------------
+# 7.2 Codage des diagnostics selon Schmoll et Fleury
+# ----------------------------------------------------------------------
 #
-# Secteur psychiatrique
-# Hôpital de secteur
-# Département
-# Hospitalisation
-# Orientation
+# Objectif : Définir les variables diagnostiques binaires selon les
+#            méthodes de Schmoll et de Fleury.
 #
+# Schmoll :
+#   - F2, F3, F4 et AUTRES sont mutuellement exclusifs.
+#   - Le diagnostic dominant est le diagnostic principal le plus fréquent
+#     parmi les passages.
+#   - En cas d'égalité : F2 > F3 > F4 > AUTRES.
+#   - F1 et F6 sont codés présents s'ils apparaissent au moins une fois
+#     parmi tous les diagnostics du patient.
+#
+# Fleury :
+#   - F2, F3, F4 et AUTRES sont indépendants.
+#   - Ils sont codés présents s'ils apparaissent au moins une fois comme
+#     diagnostic principal.
+#   - F1 et F6 sont codés présents s'ils apparaissent au moins une fois
+#     parmi tous les diagnostics du patient.
+
+cohort_diag <-
+
+  cohort_diag |>
+
+  mutate(
+
+    # ==============================================================
+    # Schmoll
+    # ==============================================================
+
+    diag_dominant_schmoll =
+
+      sapply(
+
+        diag_p_2_passages,
+
+        function(x) {
+
+          x <-
+
+            ifelse(
+
+              x %in% c("F2", "F3", "F4"),
+
+              x,
+
+              "AUTRES"
+
+            )
+
+          freq <-
+
+            table(
+
+              factor(
+
+                x,
+
+                levels = c(
+                  "F2",
+                  "F3",
+                  "F4",
+                  "AUTRES"
+                )
+
+              )
+
+            )
+
+          names(freq)[which.max(freq)]
+
+        }
+
+      ),
+
+diag_F2_schmoll =
+  diag_dominant_schmoll == "F2",
+
+diag_F3_schmoll =
+  diag_dominant_schmoll == "F3",
+
+diag_F4_schmoll =
+  diag_dominant_schmoll == "F4",
+
+diag_autres_schmoll =
+  diag_dominant_schmoll == "AUTRES",
+
+diag_F1_schmoll =
+
+  sapply(
+    diag_t_2_patient,
+    function(x) "F1" %in% x
+  ),
+
+diag_F6_schmoll =
+
+  sapply(
+    diag_t_2_patient,
+    function(x) "F6" %in% x
+  ),
 
 
+
+# ==============================================================
+# Fleury
+# ==============================================================
+
+diag_F2_fleury =
+
+  sapply(
+    diag_p_2_passages,
+    function(x) "F2" %in% x
+  ),
+
+diag_F3_fleury =
+
+  sapply(
+    diag_p_2_passages,
+    function(x) "F3" %in% x
+  ),
+
+diag_F4_fleury =
+
+  sapply(
+    diag_p_2_passages,
+    function(x) "F4" %in% x
+  ),
+
+diag_autres_fleury =
+
+  sapply(
+
+    diag_p_2_passages,
+
+    function(x)
+
+      any(
+
+        !(x %in% c(
+          "F2",
+          "F3",
+          "F4"
+        ))
+
+      )
+
+  ),
+
+diag_F1_fleury =
+
+  sapply(
+    diag_t_2_patient,
+    function(x) "F1" %in% x
+  ),
+
+diag_F6_fleury =
+
+  sapply(
+    diag_t_2_patient,
+    function(x) "F6" %in% x
+  )
+
+  )
+# ----------------------------------------------------------------------
+# 8.1 Variables d'hospitalisation
+# ----------------------------------------------------------------------
+#
+# Objectif : Décrire le recours à l'hospitalisation psychiatrique au
+#            niveau patient sur l'ensemble du suivi.
+#
+# hospitalisation :
+#   TRUE si au moins une hospitalisation psychiatrique.
+#
+# nb_hospitalisation :
+#   Nombre total d'hospitalisations psychiatriques.
+#
+# nb_hospitalisation_ssc :
+#   Nombre total d'hospitalisations sous contrainte.
+#
+# prop_hospitalisation :
+#   Proportion des passages ayant abouti à une hospitalisation.
+#
+# prop_hospitalisation_ssc :
+#   Proportion des hospitalisations réalisées sous contrainte.
+
+cohort_organisation <-
+
+  pass_enrichi |>
+
+  group_by(
+    id_patient
+  ) |>
+
+summarise(
+
+  nb_hospitalisation =
+    sum(
+      orientation_finale == "HOSPIT_PSY",
+      na.rm = TRUE
+    ),
+
+  nb_hospitalisation_ssc =
+    sum(
+      orientation_finale == "HOSPIT_PSY" &
+        mls_g == "SSC",
+      na.rm = TRUE
+    ),
+
+  hospitalisation =
+    nb_hospitalisation > 0,
+
+  hospitalisation_sl =
+    any(
+      orientation_finale == "HOSPIT_PSY" &
+        mls_g == "SL",
+      na.rm = TRUE
+    ),
+
+  hospitalisation_ssc =
+    nb_hospitalisation_ssc > 0,
+
+  prop_hospitalisation =
+    nb_hospitalisation / n(),
+
+  prop_hospitalisation_ssc =
+    if_else(
+      nb_hospitalisation > 0,
+      nb_hospitalisation_ssc / nb_hospitalisation,
+      NA_real_
+    ),
+
+  orientation_finale =
+    if_else(
+      nb_hospitalisation > 0,
+      "HOSPIT_PSY",
+      "NON_ADMIS"
+    ),
+
+  .groups =
+    "drop"
+
+)
+# ----------------------------------------------------------------------
+# 8.2 Fusion avec la cohorte
+# ----------------------------------------------------------------------
+
+cohort <-
+
+  cohort |>
+
+  left_join(
+
+    cohort_organisation,
+
+    by = "id_patient"
+
+  )
+
+# ----------------------------------------------------------------------
+# 8.3 Contrôles qualité
+# ----------------------------------------------------------------------
+
+stopifnot(
+  nrow(cohort) == n_distinct(cohort$id_patient)
+)
+
+stopifnot(
+  !anyDuplicated(cohort$id_patient)
+)
+
+stopifnot(
+  all(
+    cohort$nb_hospitalisation <= cohort$nb_passages
+  )
+)
+
+stopifnot(
+  all(
+    cohort$nb_hospitalisation_ssc <=
+      cohort$nb_hospitalisation
+  )
+)
+
+stopifnot(
+  all(
+    cohort$prop_hospitalisation >= 0 &
+      cohort$prop_hospitalisation <= 1
+  )
+)
+
+stopifnot(
+  all(
+    is.na(cohort$prop_hospitalisation_ssc) |
+      (
+        cohort$prop_hospitalisation_ssc >= 0 &
+          cohort$prop_hospitalisation_ssc <= 1
+      )
+  )
+)
+
+message(
+  "Patients avec au moins une hospitalisation : ",
+  sum(cohort$hospitalisation)
+)
+
+message(
+  "Nombre total d'hospitalisations : ",
+  sum(cohort$nb_hospitalisation)
+)
+
+message(
+  "Nombre total d'hospitalisations SSC : ",
+  sum(cohort$nb_hospitalisation_ssc)
+)
 
 # ======================================================================
 # 9. Définition des Frequent Users
 # ======================================================================
-# Pourquoi     : 
-# Entrée       : 
-# Sortie       : 
-# Objet créé   : 
-# Unité statistique : 
 #
-# Définition principale
-# Analyses complémentaires
-# Fenêtre glissante
+# Objectif     : Identifier les patients selon deux seuils de Frequent
+#                User sur une fenêtre glissante de 365 jours.
 #
+# Entrée       : pass_enrichi
+# Sortie       : cohort
+# Objet créé   : nb_passages_365j_max, FU3, FU4
+# Unité        : 1 ligne = 1 patient
+#
+# FU3 : au moins 3 passages sur une période de 365 jours.
+# FU4 : au moins 4 passages sur une période de 365 jours.
+#
+# Le maximum est recherché sur l'ensemble des passages de chaque patient.
 
+# ----------------------------------------------------------------------
+# 9.1 Nombre maximal de passages sur 365 jours
+# ----------------------------------------------------------------------
 
+nb_passages_365j <-
+
+  pass_enrichi |>
+
+  arrange(
+    id_patient,
+    date_arrivee
+  ) |>
+
+  group_by(
+    id_patient
+  ) |>
+
+  summarise(
+
+    nb_passages_365j_max =
+      max(
+        sapply(
+          date_arrivee,
+          \(date_debut) {
+
+            sum(
+              date_arrivee >= date_debut &
+                date_arrivee <= date_debut + lubridate::days(364)
+            )
+
+          }
+        )
+      ),
+
+    .groups =
+      "drop"
+
+  )
+
+# ----------------------------------------------------------------------
+# 9.2 Ajout à la cohorte
+# ----------------------------------------------------------------------
+
+cohort <-
+
+  cohort |>
+
+  left_join(
+    nb_passages_365j,
+    by = "id_patient"
+  )
+
+# ----------------------------------------------------------------------
+# 9.3 Définition des Frequent Users
+# ----------------------------------------------------------------------
+#
+# Deux seuils sont conservés afin de pouvoir les comparer ultérieurement.
+
+cohort <-
+
+  cohort |>
+
+  mutate(
+
+    # Frequent User : au moins 3 passages sur 365 jours
+
+    FU3 =
+      nb_passages_365j_max >= 3,
+
+    # Frequent User : au moins 4 passages sur 365 jours
+
+    FU4 =
+      nb_passages_365j_max >= 4
+
+  )
+
+# ----------------------------------------------------------------------
+# 9.4 Contrôles qualité
+# ----------------------------------------------------------------------
+
+stopifnot(
+  !anyNA(cohort$nb_passages_365j_max)
+)
+
+stopifnot(
+  all(
+    cohort$FU4 <= cohort$FU3
+  )
+)
+
+stopifnot(
+  all(
+    !is.na(cohort$FU3)
+  )
+)
+
+stopifnot(
+  all(
+    !is.na(cohort$FU4)
+  )
+)
+
+# Effectifs ------------------------------------------------------------
+
+message(
+  "Nombre de patients : ",
+  nrow(cohort)
+)
+
+message(
+  "FU3 : ",
+  sum(cohort$FU3),
+  " patients (",
+  round(
+    100 * mean(cohort$FU3),
+    1
+  ),
+  " %)"
+)
+
+message(
+  "FU4 : ",
+  sum(cohort$FU4),
+  " patients (",
+  round(
+    100 * mean(cohort$FU4),
+    1
+  ),
+  " %)"
+)
+
+# ----------------------------------------------------------------------
+# 9.5 Comparaison FU3 / FU4
+# ----------------------------------------------------------------------
+
+cohort |>
+
+  count(
+    FU3,
+    FU4
+  )
 
 # ======================================================================
 # 10. Contrôle qualité de la cohorte

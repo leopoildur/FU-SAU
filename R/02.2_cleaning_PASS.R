@@ -370,10 +370,8 @@ pass <- pass |>
   mutate(
     mls_f = get_mls_label(mls),
     mls_g = case_when(
-      mls_f == "SL"                              ~ "SL",
-      mls_f %in% c("SPDT", "SPPI", "SPDRE")     ~ "SSC",
-      mls_f %in% c("OPP", "DETENUS", "PENAL")   ~ "AUTRES",
-      TRUE                                       ~ "INCONNU"
+      mls_f == "SL" ~ "SL",
+      mls_f %in% c("SPDT", "SPPI", "SPDRE", "OPP", "DETENUS", "PENAL") ~ "SSC",
     )
   )
 
