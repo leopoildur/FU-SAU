@@ -75,7 +75,7 @@ pass <- readRDS(here::here("data", "processed", "pass_clean.rds"))
 
 # 2. Structure générale et contrôles préliminaires ======================
 
-# Pourquoi : Avant de fusionner les données, il est crucial de vérifier les dimensions
+# Pourquoi : Avant de fusionner les données, vérifier les dimensions
 #            des dataframes importés et la cohérence des identifiants (`id_passage`).
 #            Cela permet d'identifier d'éventuels problèmes (passages sans avis ou avis sans passage)
 #            qui pourraient affecter la qualité de la cohorte finale.
@@ -257,57 +257,65 @@ message(
 )
 
 # ======================================================================
-# Exclusion des patients mineurs
+# Exclusion des passages réalisés avant l'âge de 18 ans
 # ======================================================================
 #
-# Population d'étude : patients âgés de 18 ans ou plus lors de leur
-# premier passage dans la période d'étude.
+# Population d'étude :
+# passages aux urgences réalisés chez des patients âgés de 18 ans
+# ou plus au moment du passage.
 #
-# Les patients dont le premier passage est survenu avant 18 ans
-# sont exclus de la cohorte.
+# Le critère d'âge est appliqué au niveau du passage, avant toute
+# agrégation au niveau patient.
 #
-# Cette exclusion est appliquée avant les agrégations au niveau patient
-# afin que les variables longitudinales et la définition des Frequent
-# Users soient calculées uniquement sur la population adulte.
+# Ainsi, un patient devenu majeur au cours de la période d'étude
+# peut être inclus pour ses passages réalisés à partir de 18 ans,
+# sans que ses éventuels passages antérieurs à 18 ans soient pris
+# en compte dans les analyses.
+
+n_passages_avant_age <- sum(
+  pass_enrichi$age < 18,
+  na.rm = TRUE
+)
+
+n_patients_avec_passage_avant_age <- pass_enrichi |>
+  filter(age < 18) |>
+  summarise(
+    n = n_distinct(id_patient)
+  ) |>
+  pull(n)
 
 pass_enrichi <-
 
   pass_enrichi |>
 
-  arrange(
-    id_patient,
-    date_arrivee
-  ) |>
-
-  group_by(
-    id_patient
-  ) |>
-
   filter(
-    first(age) >= 18
-  ) |>
-
-  ungroup()
+    age >= 18
+  )
 
 message(
-  "Patients après exclusion des mineurs : ",
-  n_distinct(pass_enrichi$id_patient)
+  "Passages réalisés avant l'âge de 18 ans exclus : ",
+  n_passages_avant_age
 )
 
 message(
-  "Passages après exclusion des mineurs : ",
+  "Patients ayant au moins un passage avant 18 ans : ",
+  n_patients_avec_passage_avant_age
+)
+
+message(
+  "Passages après exclusion des passages <18 ans : ",
   nrow(pass_enrichi)
 )
 
+message(
+  "Patients adultes après exclusion des passages <18 ans : ",
+  n_distinct(pass_enrichi$id_patient)
+)
+
+# Contrôle : aucun passage <18 ans ne doit rester
 stopifnot(
   all(
-    pass_enrichi |>
-      group_by(id_patient) |>
-      summarise(
-        age_premier = first(age),
-        .groups = "drop"
-      ) |>
-      pull(age_premier) >= 18
+    pass_enrichi$age >= 18
   )
 )
 
@@ -446,7 +454,61 @@ cohort <-
 
   )
 
+# ======================================================================
+# Catégories d'âge
+# ======================================================================
+#
+# 18–24 ans
+# 25–44 ans
+# 45–64 ans
+# ≥65 ans
+#
+# L'âge utilisé correspond à l'âge lors du premier passage du patient.
+# ======================================================================
 
+cohort <-
+
+  cohort |>
+
+  mutate(
+
+    age_cat =
+
+      case_when(
+
+        age >= 18 & age <= 24 ~
+          "18–24 ans",
+
+        age >= 25 & age <= 44 ~
+          "25–44 ans",
+
+        age >= 45 & age <= 64 ~
+          "45–64 ans",
+
+        age >= 65 ~
+          "≥65 ans",
+
+        TRUE ~
+          NA_character_
+
+      ),
+
+    age_cat =
+
+      factor(
+
+        age_cat,
+
+        levels = c(
+          "18–24 ans",
+          "25–44 ans",
+          "45–64 ans",
+          "≥65 ans"
+        )
+
+      )
+
+  )
 
 # ----------------------------------------------------------------------
 # 5.2 Contrôle qualité
