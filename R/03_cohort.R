@@ -256,7 +256,85 @@ message(
   sum(is.na(pass_enrichi$nb_avis))
 )
 
+# ======================================================================
+# Exclusion des patients mineurs
+# ======================================================================
+#
+# Population d'étude : patients âgés de 18 ans ou plus lors de leur
+# premier passage dans la période d'étude.
+#
+# Les patients dont le premier passage est survenu avant 18 ans
+# sont exclus de la cohorte.
+#
+# Cette exclusion est appliquée avant les agrégations au niveau patient
+# afin que les variables longitudinales et la définition des Frequent
+# Users soient calculées uniquement sur la population adulte.
 
+pass_enrichi <-
+
+  pass_enrichi |>
+
+  arrange(
+    id_patient,
+    date_arrivee
+  ) |>
+
+  group_by(
+    id_patient
+  ) |>
+
+  filter(
+    first(age) >= 18
+  ) |>
+
+  ungroup()
+
+message(
+  "Patients après exclusion des mineurs : ",
+  n_distinct(pass_enrichi$id_patient)
+)
+
+message(
+  "Passages après exclusion des mineurs : ",
+  nrow(pass_enrichi)
+)
+
+stopifnot(
+  all(
+    pass_enrichi |>
+      group_by(id_patient) |>
+      summarise(
+        age_premier = first(age),
+        .groups = "drop"
+      ) |>
+      pull(age_premier) >= 18
+  )
+)
+
+# Nombre passage de jour/nuit niveau patient
+cohort_tableau1_recours <-
+
+  pass_enrichi |>
+  group_by(
+    id_patient
+  ) |>
+  summarise(
+
+    nb_passages_jour =
+      sum(
+        nuit_arrivee == FALSE,
+        na.rm = TRUE
+      ),
+
+    nb_passages_nuit =
+      sum(
+        nuit_arrivee == TRUE,
+        na.rm = TRUE
+      ),
+
+    .groups = "drop"
+
+  )
 # ======================================================================
 # 4. Construction de la cohorte patient
 # ======================================================================
@@ -478,17 +556,24 @@ message(
 # ======================================================================
 # 7. Variables psychiatriques
 # ======================================================================
+
 # ----------------------------------------------------------------------
 # 7.1 Agrégation des diagnostics au niveau patient
 # ----------------------------------------------------------------------
 #
-# Objectif : Agréger l'ensemble des informations diagnostiques de chaque
-#            patient avant le codage selon les méthodes de Schmoll et
-#            Fleury.
+# Objectif :
+# Agréger les diagnostics de l'ensemble des passages de chaque patient.
 #
-# Entrée   : pass_enrichi (1 ligne = 1 passage)
-# Sortie   : cohort_diag (1 ligne = 1 patient)
-# Unité    : 1 ligne = 1 patient
+# Deux informations sont conservées :
+#
+# 1. diag_p_2_passages
+#    = diagnostic principal de chaque passage
+#
+# 2. diag_t_2_patient
+#    = ensemble des diagnostics associés rencontrés au cours du suivi
+#
+# Unité : 1 ligne = 1 patient
+# ----------------------------------------------------------------------
 
 cohort_diag <-
 
@@ -505,27 +590,27 @@ cohort_diag <-
 
   summarise(
 
-    # Diagnostics principaux du dernier avis de chaque passage
+    # Diagnostic principal du dernier avis de chaque passage
+    #
+    # On obtient ici un vecteur de diagnostics par patient.
 
     diag_p_2_passages =
       list(
         diag_p_2_dernier_avis
       ),
 
-    # Ensemble des diagnostics rencontrés
-    # (tous les diagnostics associés de tous les passages)
+    # Ensemble des diagnostics associés rencontrés
+    # au cours de tous les passages.
 
     diag_t_2_patient =
       list(
-
         unique(
-
-          unlist(
-            diag_t_2_passage
+          na.omit(
+            unlist(
+              diag_t_2_passage
+            )
           )
-
         )
-
       ),
 
     .groups =
@@ -533,27 +618,44 @@ cohort_diag <-
 
   )
 
+
 # ----------------------------------------------------------------------
-# 7.2 Codage des diagnostics selon Schmoll et Fleury
+# Contrôle de la structure
+# ----------------------------------------------------------------------
+
+stopifnot(
+  nrow(cohort_diag) ==
+    n_distinct(pass_enrichi$id_patient)
+)
+
+stopifnot(
+  all(
+    c(
+      "id_patient",
+      "diag_p_2_passages",
+      "diag_t_2_patient"
+    ) %in%
+      names(cohort_diag)
+  )
+)
+
+
+# ----------------------------------------------------------------------
+# 7.2 Codage des diagnostics selon Schmoll
 # ----------------------------------------------------------------------
 #
-# Objectif : Définir les variables diagnostiques binaires selon les
-#            méthodes de Schmoll et de Fleury.
-#
-# Schmoll :
+# Diagnostic dominant :
 #   - F2, F3, F4 et AUTRES sont mutuellement exclusifs.
-#   - Le diagnostic dominant est le diagnostic principal le plus fréquent
-#     parmi les passages.
-#   - En cas d'égalité : F2 > F3 > F4 > AUTRES.
-#   - F1 et F6 sont codés présents s'ils apparaissent au moins une fois
-#     parmi tous les diagnostics du patient.
+#   - Le diagnostic dominant est celui qui apparaît le plus fréquemment
+#     parmi les diagnostics principaux des différents passages.
+#   - En cas d'égalité :
+#       F2 > F3 > F4 > AUTRES
 #
-# Fleury :
-#   - F2, F3, F4 et AUTRES sont indépendants.
-#   - Ils sont codés présents s'ils apparaissent au moins une fois comme
-#     diagnostic principal.
-#   - F1 et F6 sont codés présents s'ils apparaissent au moins une fois
-#     parmi tous les diagnostics du patient.
+# Diagnostics inclusifs :
+#   - F1 : présent au moins une fois au cours du suivi
+#   - F6 : présent au moins une fois au cours du suivi
+#
+# ----------------------------------------------------------------------
 
 cohort_diag <-
 
@@ -562,7 +664,7 @@ cohort_diag <-
   mutate(
 
     # ==============================================================
-    # Schmoll
+    # Diagnostic dominant Schmoll
     # ==============================================================
 
     diag_dominant_schmoll =
@@ -573,131 +675,273 @@ cohort_diag <-
 
         function(x) {
 
+          # Retirer les valeurs manquantes
+
+          x <-
+            x[
+              !is.na(x)
+            ]
+
+          # S'il n'existe aucun diagnostic exploitable
+
+          if (length(x) == 0) {
+
+            return(
+              NA_character_
+            )
+
+          }
+
+          # Recodage :
+          # F2, F3, F4 conservés
+          # tous les autres diagnostics -> AUTRES
+
           x <-
 
             ifelse(
-
-              x %in% c("F2", "F3", "F4"),
-
+              x %in% c(
+                "F2",
+                "F3",
+                "F4"
+              ),
               x,
-
               "AUTRES"
-
             )
 
-          freq <-
+          # Comptage avec ordre de priorité :
+          # F2 > F3 > F4 > AUTRES
+
+          frequences <-
 
             table(
-
               factor(
-
                 x,
-
                 levels = c(
                   "F2",
                   "F3",
                   "F4",
                   "AUTRES"
                 )
-
               )
-
             )
 
-          names(freq)[which.max(freq)]
+          names(
+            frequences
+          )[
+            which.max(frequences)
+          ]
 
         }
 
       ),
 
-diag_F2_schmoll =
-  diag_dominant_schmoll == "F2",
 
-diag_F3_schmoll =
-  diag_dominant_schmoll == "F3",
+    # ==============================================================
+    # Variables mutuellement exclusives
+    # ==============================================================
 
-diag_F4_schmoll =
-  diag_dominant_schmoll == "F4",
+    diag_F2_schmoll =
 
-diag_autres_schmoll =
-  diag_dominant_schmoll == "AUTRES",
+      diag_dominant_schmoll == "F2",
 
-diag_F1_schmoll =
+    diag_F3_schmoll =
 
-  sapply(
-    diag_t_2_patient,
-    function(x) "F1" %in% x
-  ),
+      diag_dominant_schmoll == "F3",
 
-diag_F6_schmoll =
+    diag_F4_schmoll =
 
-  sapply(
-    diag_t_2_patient,
-    function(x) "F6" %in% x
-  ),
+      diag_dominant_schmoll == "F4",
+
+    diag_autres_schmoll =
+
+      diag_dominant_schmoll == "AUTRES",
 
 
+    # ==============================================================
+    # F1 : définition inclusive
+    # ==============================================================
 
-# ==============================================================
-# Fleury
-# ==============================================================
+    diag_F1_schmoll =
 
-diag_F2_fleury =
+      sapply(
 
-  sapply(
-    diag_p_2_passages,
-    function(x) "F2" %in% x
-  ),
+        diag_t_2_patient,
 
-diag_F3_fleury =
+        function(x) {
 
-  sapply(
-    diag_p_2_passages,
-    function(x) "F3" %in% x
-  ),
+          x <-
+            x[
+              !is.na(x)
+            ]
 
-diag_F4_fleury =
+          "F1" %in% x
 
-  sapply(
-    diag_p_2_passages,
-    function(x) "F4" %in% x
-  ),
+        }
 
-diag_autres_fleury =
+      ),
 
-  sapply(
 
-    diag_p_2_passages,
+    # ==============================================================
+    # F6 : définition inclusive
+    # ==============================================================
 
-    function(x)
+    diag_F6_schmoll =
 
-      any(
+      sapply(
 
-        !(x %in% c(
-          "F2",
-          "F3",
-          "F4"
-        ))
+        diag_t_2_patient,
+
+        function(x) {
+
+          x <-
+            x[
+              !is.na(x)
+            ]
+
+          "F6" %in% x
+
+        }
 
       )
 
-  ),
-
-diag_F1_fleury =
-
-  sapply(
-    diag_t_2_patient,
-    function(x) "F1" %in% x
-  ),
-
-diag_F6_fleury =
-
-  sapply(
-    diag_t_2_patient,
-    function(x) "F6" %in% x
   )
 
+
+# ----------------------------------------------------------------------
+# 7.3 Contrôles qualité du codage Schmoll
+# ----------------------------------------------------------------------
+
+# F2, F3, F4 et AUTRES doivent être mutuellement exclusifs
+
+stopifnot(
+
+  all(
+
+    rowSums(
+
+      cbind(
+
+        cohort_diag$diag_F2_schmoll,
+
+        cohort_diag$diag_F3_schmoll,
+
+        cohort_diag$diag_F4_schmoll,
+
+        cohort_diag$diag_autres_schmoll
+
+      ),
+
+      na.rm = TRUE
+
+    ) <= 1
+
   )
+
+)
+
+
+# Chaque patient ayant un diagnostic doit avoir un diagnostic dominant
+
+patients_avec_diagnostic <-
+
+  sapply(
+    cohort_diag$diag_p_2_passages,
+    function(x) {
+      any(
+        !is.na(x)
+      )
+    }
+  )
+
+stopifnot(
+
+  all(
+
+    !is.na(
+      cohort_diag$diag_dominant_schmoll[
+        patients_avec_diagnostic
+      ]
+    )
+
+  )
+
+)
+
+
+# Contrôle du nombre de patients
+
+stopifnot(
+
+  nrow(cohort_diag) ==
+
+    n_distinct(
+      pass_enrichi$id_patient
+    )
+
+)
+
+
+# ----------------------------------------------------------------------
+# Effectifs
+# ----------------------------------------------------------------------
+
+message(
+  "Diagnostics Schmoll :"
+)
+
+message(
+  "F2 dominant : ",
+  sum(
+    cohort_diag$diag_F2_schmoll,
+    na.rm = TRUE
+  )
+)
+
+message(
+  "F3 dominant : ",
+  sum(
+    cohort_diag$diag_F3_schmoll,
+    na.rm = TRUE
+  )
+)
+
+message(
+  "F4 dominant : ",
+  sum(
+    cohort_diag$diag_F4_schmoll,
+    na.rm = TRUE
+  )
+)
+
+message(
+  "Autres dominant : ",
+  sum(
+    cohort_diag$diag_autres_schmoll,
+    na.rm = TRUE
+  )
+)
+
+message(
+  "F1 inclusif : ",
+  sum(
+    cohort_diag$diag_F1_schmoll,
+    na.rm = TRUE
+  )
+)
+
+message(
+  "F6 inclusif : ",
+  sum(
+    cohort_diag$diag_F6_schmoll,
+    na.rm = TRUE
+  )
+)
+# ======================================================================
+# Fin des variables psychiatriques
+# ======================================================================
+
+  
+
 # ----------------------------------------------------------------------
 # 8.1 Variables d'hospitalisation
 # ----------------------------------------------------------------------
