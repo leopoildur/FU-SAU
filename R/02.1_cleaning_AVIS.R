@@ -20,140 +20,59 @@
 
 
 # Chargement du projet ==================================================
-# Charger les packages, fonctions et constantes du projet.
-# Importer la table AVIS brute.
 
-source(
-  here::here(
-    "R",
-    "utils",
-    "load_project.R"
-  )
-)
+source(here::here("R", "utils", "load_project.R"))
 
-avis <- readRDS(
-  here::here(
-    "data",
-    "interim",
-    "avis_raw.rds"
-  )
-)
+avis <- readRDS(here::here("data", "interim", "avis_raw.rds"))
 
 
 # Structure générale ====================================================
-# Décrire rapidement la table importée :
-# - dimensions
-# - types des variables
-# - premières vérifications globales
 
 ## Dimensions ------------------------------------------------------------
-# Vérifier le nombre de lignes et de variables.
-
 dim(avis)
 
-
 ## Types des variables ---------------------------------------------------
-# Vérifier le nom, le type et la structure des variables.
-
 glimpse(avis)
 
-
 ## Contrôle global -------------------------------------------------------
-# Résumer rapidement la qualité de la table avant nettoyage.
-
 skim(avis)
 
 
 # Identifiants ==========================================================
-# Nettoyer les identifiants patients et passages.
-# Vérifier leur cohérence et supprimer les doublons exacts.
 
-# Renommage -------------------------------------------------------------
-# Renommer les identifiants avec des noms explicites.
-
+# Renommage et Conversion -----------------------------------------------
 avis <- avis |>
   rename(
     id_patient = idpat,
     id_passage = i_ddos
-  )
-
-
-# Conversion ------------------------------------------------------------
-# Convertir les identifiants au format caractère.
-
-avis <- avis |>
+  ) |>
   mutate(
     id_patient = as.character(id_patient),
     id_passage = as.character(id_passage)
   )
 
-
 # Contrôles -------------------------------------------------------------
+avis |> summarise(n_patients = n_distinct(id_patient))
+avis |> summarise(n_passages = n_distinct(id_passage))
 
-# Nombre de patients uniques
 avis |>
-  summarise(
-    n_patients = n_distinct(id_patient)
-  )
+  distinct(id_passage, id_patient) |>
+  count(id_passage, name = "n_patients") |>
+  filter(n_patients > 1)
 
-# Nombre de passages uniques
 avis |>
-  summarise(
-    n_passages = n_distinct(id_passage)
-  )
-
-# Un passage ne doit correspondre qu'à un seul patient
-avis |>
-  distinct(
-    id_passage,
-    id_patient
-  ) |>
-  count(
-    id_passage,
-    name = "n_patients"
-  ) |>
-  filter(
-    n_patients > 1
-  )
-
-# Un patient peut avoir plusieurs passages
-avis |>
-  count(
-    id_patient,
-    name = "n_passages"
-  ) |>
-  arrange(
-    desc(n_passages)
-  )
-
+  count(id_patient, name = "n_passages") |>
+  arrange(desc(n_passages))
 
 # Doublons --------------------------------------------------------------
-# Identifier puis supprimer les doublons exacts.
-
-# Nombre de doublons exacts
+sum(duplicated(avis))
+avis <- avis |> distinct()
 sum(duplicated(avis))
 
-# Suppression des doublons exacts
-avis <- avis |>
-  distinct()
-
-# Vérification
-sum(duplicated(avis))
 
 # Variables temporelles =================================================
-# Convertir les dates.
-# Vérifier leur cohérence.
-# Créer les variables utiles pour les analyses temporelles :
-# - heure
-# - nuit
-# - week-end
-# - délai
-# - jour de semaine
-# - etc.
 
 # Renommage -------------------------------------------------------------
-# Renommer les variables temporelles pour expliciter leur contenu.
-
 avis <- avis |>
   rename(
     date_arrivee = debu_tt,
@@ -164,275 +83,104 @@ avis <- avis |>
 
 stopifnot(is.character(avis$date_arrivee))
 
-# Conversion ------------------------------------------------------------
-# Convertir les dates et heures au format POSIXct.
-
+# Conversion et Variables dérivées --------------------------------------
 avis <- avis |>
   mutate(
     date_arrivee = parse_datetime_fr(date_arrivee),
     date_sortie = parse_datetime_fr(date_sortie),
     date_demande = parse_datetime_fr(date_demande),
-    date_avis = parse_datetime_fr(date_avis)
-  )
+    date_avis = parse_datetime_fr(date_avis),
 
-
-# Contrôle --------------------------------------------------------------
-# Vérifier le nombre de valeurs manquantes après conversion.
-
-avis |>
-  summarise(
-    across(
-      c(
-        date_arrivee,
-        date_sortie,
-        date_demande,
-        date_avis
-      ),
-      ~ sum(is.na(.))
-    )
-  )
-
-
-# Variables dérivées ----------------------------------------------------
-# Créer les variables temporelles utiles aux analyses.
-
-avis <- avis |>
-  mutate(
-
-    # Heure de la journée
     heure_arrivee = get_hour(date_arrivee),
     heure_avis = get_hour(date_avis),
     heure_sortie = get_hour(date_sortie),
 
-    # Passage de nuit
     nuit_arrivee = is_night(date_arrivee),
     nuit_avis = is_night(date_avis),
     nuit_sortie = is_night(date_sortie),
 
-    # Passage le week-end
     weekend_arrivee = is_weekend(date_arrivee),
     weekend_avis = is_weekend(date_avis),
     weekend_sortie = is_weekend(date_sortie),
 
-    # Jour de la semaine
     jour_arrivee = weekday_label(date_arrivee),
     jour_avis = weekday_label(date_avis),
     jour_sortie = weekday_label(date_sortie),
 
-    # Délais
     delai_avis = date_avis - date_arrivee,
-    LOS = date_sortie - date_arrivee
-  )
-
-# Garde -----------------------------------------------------------------
-# Identifier les avis réalisés pendant une garde.
-
-avis <- avis |>
-  mutate(
+    LOS = date_sortie - date_arrivee,
+    
     ferie = is_holiday(date_avis),
     garde = nuit_avis | weekend_avis | ferie
   )
 
-# Contrôle
-
-avis |>
-  count(
-    garde,
-    sort = TRUE
-  )
-
-avis |>
-  count(
-    ferie
-  )
-
+# Contrôles --------------------------------------------------------------
+avis |> summarise(across(c(date_arrivee, date_sortie, date_demande, date_avis), ~ sum(is.na(.))))
+avis |> count(garde, sort = TRUE)
+avis |> count(ferie)
 
 # Cohérence chronologique -----------------------------------------------
-# Vérifier l'ordre logique des événements.
+avis |> filter(date_sortie < date_arrivee)
 
-avis |>
-  filter(date_sortie < date_arrivee)
-
-# = 0
-
-avis |>
-  filter(date_demande < date_arrivee)
-
-# = 6
-# CàD 6 passages ou la demande d'avis précède l'arrivée.
-# Probable erreur de saisie
-# Peu d'impact, négligeable, enregistré pour analyse ultérieure
-
-anomalies_demande <- avis |>
-  filter(
-    date_demande < date_arrivee
-  )
-
-avis |>
-  filter(date_avis < date_arrivee)
-
-# = 16
-# CàD 16 avis précédant l'arrivée
-# Probable erreur de saisie
-# Peu d'impact, négligeable, enregistré pour analyse ultérieure
-
-anomalies_avis_avant <- avis |>
-  filter(
-    date_avis < date_arrivee
-  )
-
-avis |>
-  filter(date_avis > date_sortie)
-
-# = 1068
-# CàD 1068 avis édités après la sortie
-# Evaluation rédigée ou corrigée après la sortie
-# Pas d'impact sur la durée de séjour
-# A enregistrer pour vérification (exclure comme donnée aberrant si delta trop important
-
-anomalies_avis_apres <- avis |>
-  filter(
-    date_avis > date_sortie
-  )
-
+anomalies_demande <- avis |> filter(date_demande < date_arrivee)
+anomalies_avis_avant <- avis |> filter(date_avis < date_arrivee)
+anomalies_avis_apres <- avis |> filter(date_avis > date_sortie)
 
 # Résumé descriptif -----------------------------------------------------
-# Décrire rapidement les durées créées (en min)
-
 summary(as.numeric(avis$delai_avis))
-
 summary(as.numeric(avis$LOS))
 
 
-
-
 # Variables démographiques ==============================================
-# Nettoyer les variables décrivant les patients :
-# - âge
-# - sexe
-# - code postal
-# - département
-# Vérifier les valeurs aberrantes.
 
 # Âge -------------------------------------------------------------------
-# Vérifier la distribution de l'âge et rechercher d'éventuelles valeurs
-# aberrantes.
-
 summary(avis$age)
 
 avis |>
-  ggplot(
-    aes(x = age)
-  ) +
-  geom_histogram(
-    binwidth = 5,
-    fill = "#4E79A7",
-    color = "white"
-  ) +
-  labs(
-    title = "Distribution des âges",
-    x = "Âge (années)",
-    y = "Nombre d'avis"
-  ) +
+  ggplot(aes(x = age)) +
+  geom_histogram(binwidth = 5, fill = "#4E79A7", color = "white") +
+  labs(title = "Distribution des âges", x = "Âge (années)", y = "Nombre d'avis") +
   theme_fu()
 
-
-# Sexe ------------------------------------------------------------------
-# Remplacer le codage PMSI par des modalités explicites.
-
+# Sexe, Code postal, Département ----------------------------------------
 avis <- avis |>
+  rename(code_postal = cp) |>
   mutate(
-    sexe = get_sexe_label(sexe)
-  )
-
-avis |>
-  count(
-    sexe,
-    sort = TRUE
-  )
-
-
-# Code postal -----------------------------------------------------------
-# Renommer la variable et harmoniser son format.
-
-avis <- avis |>
-  rename(
-    code_postal = cp
-  ) |>
-  mutate(
+    sexe = get_sexe_label(sexe),
     code_postal = as.character(code_postal),
-    code_postal = stringr::str_pad(
-      code_postal,
-      width = 5,
-      side = "left",
-      pad = "0"
-    )
-  )
-
-
-# Département -----------------------------------------------------------
-# Déduire le département de résidence à partir du code postal.
-
-avis <- avis |>
-  mutate(
+    code_postal = stringr::str_pad(code_postal, width = 5, side = "left", pad = "0"),
     departement = get_department(code_postal)
   )
 
-
-avis |>
-  count(
-    departement,
-    sort = TRUE
-  )
-
+avis |> count(sexe, sort = TRUE)
+avis |> count(departement, sort = TRUE)
 
 # Contrôles -------------------------------------------------------------
-# Vérifier la cohérence des variables démographiques.
+avis |> filter(age < 15 | age > 110)
+avis |> summarise(across(c(age, sexe, code_postal, departement), ~ sum(is.na(.))))
 
-avis |>
-  filter(
-    age < 15 |
-      age > 110
-  )
-
-avis |>
-  summarise(
-    across(
-      c(
-        age,
-        sexe,
-        code_postal,
-        departement
-      ),
-      ~ sum(is.na(.))
-    )
-  )
 
 # Variables psychiatriques ==============================================
 
 # Diagnostic principal --------------------------------------------------
-# Renommer et harmoniser le diagnostic principal CIM-10.
-
 avis <- avis |>
-  rename(
-    diag_p = dp
-  ) |>
+  rename(diag_p = dp) |>
   mutate(
     diag_p = stringr::str_trim(diag_p),
-    diag_p = stringr::str_to_upper(diag_p)
+    diag_p = stringr::str_to_upper(diag_p),
+    diag_p_1 = stringr::str_sub(diag_p, 1, 1),
+    diag_p_2 = stringr::str_sub(diag_p, 1, 2),
+    diag_p_3 = stringr::str_sub(diag_p, 1, 3),
+    
+    # Catégorisation du diagnostic principal
+    categorie_diag_p = categoriser_cim10(diag_p),
+    usage_substance_p = detecter_usage_substance(categorie_diag_p)
   )
 
-# Distribution des diagnostics principaux
-avis |>
-  count(
-    diag_p,
-    sort = TRUE
-  )
-
+avis |> count(diag_p, sort = TRUE)
+avis |> count(categorie_diag_p, sort = TRUE)
 
 # Diagnostics associés --------------------------------------------------
-# Renommer les variables relatives aux diagnostics associés.
-
 avis <- avis |>
   rename(
     nb_diag_a = n_das,
@@ -440,511 +188,91 @@ avis <- avis |>
   ) |>
   mutate(
     diag_a = stringr::str_trim(diag_a),
-    diag_a = stringr::str_to_upper(diag_a)
-  )
-
-# Distribution du nombre de diagnostics associés
-avis |>
-  count(
-    nb_diag_a,
-    sort = TRUE
-  )
-
-
-# Variables dérivées ----------------------------------------------------
-# Créer les niveaux de codage du diagnostic principal.
-
-avis <- avis |>
-  mutate(
-
-    # Chapitre CIM-10 (1 caractère)
-    diag_p_1 = stringr::str_sub(
-      diag_p,
-      1,
-      1
-    ),
-
-    # Classe CIM-10 (2 caractères)
-    diag_p_2 = stringr::str_sub(
-      diag_p,
-      1,
-      2
-    )
-
-  )
-
-    # Sous-classe CIM-10 (3 caractères)
-avis <- avis |>
-  mutate(
-    diag_p_3 = stringr::str_sub(
-      diag_p,
-      1,
-      3
-    )
-  )
-
-# Contrôles -------------------------------------------------------------
-# Vérifier la qualité des diagnostics.
-
-# Répartition des chapitres CIM-10
-
-avis |>
-  count(
-    diag_p_1,
-    sort = TRUE
-  )
-
-# Répartition des classes CIM-10
-
-avis |>
-  count(
-    diag_p_2,
-    sort = TRUE
-  )
-
-# Valeurs manquantes
-avis |>
-  summarise(
-    across(
-      c(
-        diag_p,
-        diag_a
-      ),
-      ~ sum(is.na(.))
-    )
-  )
-
-# Codes CIM-10 de longueur anormale
-avis |>
-  filter(
-    nchar(diag_p) < 3
-  )
-
-# = 0
-
-# Diagnostics ne commençant pas par une lettre
-avis |>
-  filter(
-    !stringr::str_detect(
-      diag_p,
-      "^[A-Z]"
-    )
-  )
-
-# = 0
-
-# Diagnostics associés ==================================================
-
-# Nettoyage -------------------------------------------------------------
-
-avis <- avis |>
-  mutate(
-
-    # Suppression des espaces multiples
+    diag_a = stringr::str_to_upper(diag_a),
     diag_a = stringr::str_squish(diag_a),
-
-    # Chaînes vides -> NA
-    diag_a = na_if(diag_a, "")
-
+    diag_a = na_if(diag_a, ""),
+    diag_a = stringr::str_split(diag_a, pattern = "\\s+")
   )
 
-
-# Transformation en liste -----------------------------------------------
+avis$diag_a <- lapply(avis$diag_a, function(x) {
+  if (length(x) == 1 && is.na(x)) character(0) else x
+})
 
 avis <- avis |>
   mutate(
-
-    diag_a = stringr::str_split(
-      diag_a,
-      pattern = "\\s+"
-    )
-
-  )
-
-
-# Remplacement des NA par des listes vides ------------------------------
-
-avis$diag_a <-
-  lapply(
-    avis$diag_a,
-    function(x) {
-
-      if (length(x) == 1 && is.na(x)) {
-
-        character(0)
-
-      } else {
-
-        x
-
-      }
-
-    }
-  )
-
-
-# Variables dérivées ----------------------------------------------------
-
-    # Famille CIM-10 (1 caractèrs)
-
-avis <- avis |>
-  mutate(
-
-    diag_a_1 = lapply(
-      diag_a,
-      function(x) stringr::str_sub(x, 1, 1)
-    ),
-
-    # Classe CIM-10 (2 caractères)
-
-    diag_a_2 = lapply(
-      diag_a,
-      function(x) stringr::str_sub(x, 1, 2)
-    )
-
-  )
-
-    # Sous-classe CIM-10 (3 caractères)
-
-avis <- avis |>
-  mutate(
-
-    diag_a_3 = lapply(
-      diag_a,
-      function(x) {
-
-        stringr::str_sub(
-          x,
-          1,
-          3
-        )
-
-      }
-
-    )
-
-  )
-
-
-# Contrôles -------------------------------------------------------------
-
-# Nombre réel de diagnostics associés
-
-avis <- avis |>
-  mutate(
+    diag_a_1 = lapply(diag_a, function(x) stringr::str_sub(x, 1, 1)),
+    diag_a_2 = lapply(diag_a, function(x) stringr::str_sub(x, 1, 2)),
+    diag_a_3 = lapply(diag_a, function(x) stringr::str_sub(x, 1, 3)),
     nb_diag_a_calcule = lengths(diag_a)
   )
 
-
-# Comparaison avec la variable PMSI
-
-avis |>
-  count(
-    nb_diag_a,
-    nb_diag_a_calcule
-  )
-
-
-# Nombre de dossiers sans diagnostic associé
-
-sum(
-  lengths(avis$diag_a) == 0
-)
-
-
-# Distribution du nombre de diagnostics associés
-
-table(
-  lengths(avis$diag_a)
-)
-
-
-# Aperçu
-
-avis |>
-  select(
-    diag_a,
-    diag_a_1,
-    diag_a_2
-  ) |>
-  slice_head(
-    n = 10
-  )
+avis |> count(nb_diag_a, nb_diag_a_calcule)
+sum(lengths(avis$diag_a) == 0)
+table(lengths(avis$diag_a))
 
 # Diagnostics totaux ==================================================
-
-
 avis <- avis |>
   mutate(
-
-    diag_t = purrr::map2(
-      diag_p,
-      diag_a,
-      function(dp, das) {
-
-        unique(
-          c(
-            dp,
-            das
-          )
-        )
-
-      }
-
-    )
-
+    diag_t = purrr::map2(diag_p, diag_a, ~ unique(c(.x, .y))),
+    diag_t_1 = lapply(diag_t, function(x) stringr::str_sub(x, 1, 1)),
+    diag_t_2 = lapply(diag_t, function(x) stringr::str_sub(x, 1, 2)),
+    diag_t_3 = lapply(diag_t, function(x) stringr::str_sub(x, 1, 3)),
+    nb_diag_t = lengths(diag_t),
+    
+    # Dépistage transversal (tous diagnostics confondus) pour capturer les comorbidités fréquentes
+    usage_substance_t = purrr::map_chr(diag_t, ~ dplyr::if_else(any(detecter_usage_substance(categoriser_cim10(.x)) == "Oui"), "Oui", "Non")),
+    suicidalite_t = purrr::map_chr(diag_t, ~ dplyr::if_else(any(categoriser_cim10(.x) == "Suicidalité"), "Oui", "Non"))
   )
 
-avis <- avis |>
-  mutate(
+avis |> count(nb_diag_t, sort = TRUE)
+avis |> count(usage_substance_t)
+avis |> count(suicidalite_t)
 
-    diag_t_1 = lapply(
-      diag_t,
-      function(x) {
-
-        stringr::str_sub(
-          x,
-          1,
-          1
-        )
-
-      }
-
-    )
-
-  )
-
-avis <- avis |>
-  mutate(
-
-    diag_t_2 = lapply(
-      diag_t,
-      function(x) {
-
-        stringr::str_sub(
-          x,
-          1,
-          2
-        )
-
-      }
-
-    )
-
-  )
-
-avis <- avis |>
-  mutate(
-
-    diag_t_3 = lapply(
-      diag_t,
-      function(x) {
-
-        stringr::str_sub(
-          x,
-          1,
-          3
-        )
-
-      }
-
-    )
-
-  )
-
-avis <- avis |>
-  mutate(
-    nb_diag_t = lengths(diag_t)
-  )
-
-avis |>
-  count(
-    nb_diag_t,
-    sort = TRUE
-  )
-
-avis |>
-  select(
-    diag_p,
-    diag_a,
-    diag_t,
-    nb_diag_t
-  ) |>
-  slice_head(
-    n = 10
-  )
 
 # Variables organisationnelles ==========================================
 
 # Mode légal de soins ---------------------------------------------------
-# Nettoyer et vérifier la variable MLS.
-
 avis <- avis |>
   mutate(
-    mls_f = get_mls_label(mls)
-  )
-
-# Regroupement du mode légal de soins ===================================
-
-avis <- avis |>
-  mutate(
-
-    mls_g = case_when(
-
+    mls_f = get_mls_label(mls),
+    mls_g = dplyr::case_when(
       mls_f == "SL" ~ "SL",
-
-      mls_f %in% c(
-        "SPDT",
-        "SPPI",
-        "SPDRE",
-        "OPP",
-        "DETENUS",
-        "PENAL"
-      ) ~ "SSC",
-
+      mls_f %in% c("SPDT", "SPPI", "SPDRE", "OPP", "DETENUS", "PENAL") ~ "SSC",
+      TRUE ~ "INCONNU"
     )
-
   )
 
-
-# Contrôles -------------------------------------------------------------
-
-# Distribution des modes légaux de soins
-avis |>
-  count(
-    mls_f,
-    sort = TRUE
-  )
-
-# Correspondance PMSI ↔ libellés
-avis |>
-  count(
-    mls,
-    mls_f,
-    sort = TRUE
-  )
-
-# Vérification des valeurs non codées
-avis |>
-  filter(
-    mls_f == "INCONNU"
-  )
-
-# Distribution des groupes
-
-avis |>
-  count(
-    mls_g,
-    sort = TRUE
-  )
-
-# Correspondance avec le codage détaillé
-
-avis |>
-  count(
-    mls_f,
-    mls_g,
-    sort = TRUE
-  )
-
-# Vérification des valeurs non classées
-
-avis |>
-  filter(
-    mls_g == "INCONNU"
-  )
+avis |> count(mls_f, sort = TRUE)
+avis |> count(mls_g, sort = TRUE)
+avis |> filter(mls_g == "INCONNU")
 
 # Secteur psychiatrique -------------------------------------------------
-# Nettoyer la variable secteur.
-
 avis <- avis |>
   mutate(
-    secteur = stringr::str_squish(secteur)
-  )
-
-# Distribution
-avis |>
-  count(
-    secteur,
-    sort = TRUE
-  )
-
-# Secteur géographique 3 variables (94, IDF hors 94, Hors IDF)
-
-avis <- avis |>
-  mutate(
-
+    secteur = stringr::str_squish(secteur),
     secteur_f = dplyr::case_when(
-
-      # Secteurs du Val-de-Marne
-      stringr::str_detect(secteur, "SECTEUR\\s+[0-9]{2}$") ~
-        paste0(
-          "94G",
-          stringr::str_extract(secteur, "[0-9]{2}$")
-        ),
-
-      # IDF hors secteur 94
-      stringr::str_detect(secteur, "IDF") ~
-        "IDF hors 94",
-
-      # Tout le reste
-      TRUE ~
-        "Hors IDF"
-
+      stringr::str_detect(secteur, "SECTEUR\\s+[0-9]{2}$") ~ paste0("94G", stringr::str_extract(secteur, "[0-9]{2}$")),
+      stringr::str_detect(secteur, "IDF") ~ "IDF hors 94",
+      TRUE ~ "Hors IDF"
     )
-
   )
 
-
-
-
-
-
-# Contrôle qualité dans utils/checks.R ======================================================
-# Vérifier la qualité finale de la table :
-# - dimensions
-# - valeurs manquantes
-# - doublons
-# - cohérence des variables
-# - contrôle des identifiants
+avis |> count(secteur, sort = TRUE)
+avis |> count(secteur_f, sort = TRUE)
 
 
 # Sauvegarde ============================================================
 
-# Création du dossier si nécessaire
-dir.create(
-  here::here(
-    "data",
-    "processed"
-  ),
-  recursive = TRUE,
-  showWarnings = FALSE
-)
+dir.create(here::here("data", "processed"), recursive = TRUE, showWarnings = FALSE)
 
-# Sauvegarde de la table nettoyée
-saveRDS(
-  avis,
-  here::here(
-    "data",
-    "processed",
-    "avis_clean.rds"
-  )
-)
+saveRDS(avis, here::here("data", "processed", "avis_clean.rds"))
 
-# Export optionnel en CSV (utile pour vérifier les données)
-# write_csv(
-#   avis,
-#   here::here(
-#     "data",
-#     "processed",
-#     "avis_clean.csv"
-#   )
-# )
+# write_csv(avis, here::here("data", "processed", "avis_clean.csv"))
 
 
 # Fin du script =========================================================
 
-gitmessage("======================================================")
+message("======================================================")
 message(" Nettoyage de la table AVIS terminé avec succès")
 message("------------------------------------------------------")
 message(" Nombre de lignes   : ", nrow(avis))
