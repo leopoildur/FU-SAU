@@ -211,58 +211,97 @@ message("Variables de recours ajoutées.")
 
 
 # ======================================================================
-# 7. Variables psychiatriques
+# 7. Variables psychiatriques et diagnostic dominant
 # ======================================================================
 
 cohort_diag <- pass_enrichi |>
   arrange(id_patient, date_arrivee) |>
   group_by(id_patient) |>
   summarise(
-    diag_p_2_passages = list(diag_p_2_dernier_avis),
-    diag_t_2_patient = list(unique(na.omit(unlist(diag_t_2_passage)))),
+    # Décompte des occurrences par groupe diagnostique pour chaque patient
+    n_F2 = sum(diag_p_2_dernier_avis == "F2", na.rm = TRUE),
+    n_F3 = sum(diag_p_2_dernier_avis == "F3", na.rm = TRUE),
+    n_F1 = sum(diag_p_2_dernier_avis == "F1", na.rm = TRUE),
+    n_F6 = sum(diag_p_2_dernier_avis == "F6", na.rm = TRUE),
+    n_F4 = sum(diag_p_2_dernier_avis == "F4", na.rm = TRUE),
+    n_total_diag = sum(!is.na(diag_p_2_dernier_avis)),
+    
+    # Historique complet des codes pour les comorbidités
+    diag_p_2_passages = list(na.omit(diag_p_2_dernier_avis)),
+    diag_p_passages   = list(na.omit(diag_p_dernier_avis)),
+    diag_t_2_patient  = list(unique(na.omit(unlist(diag_t_2_passage)))),
+    
     usage_substance_patient = dplyr::if_else(any(usage_substance_t == "Oui", na.rm = TRUE), "Oui", "Non"),
-    suicidalite_patient = dplyr::if_else(any(suicidalite_t == "Oui", na.rm = TRUE), "Oui", "Non"),
+    suicidalite_patient     = dplyr::if_else(any(suicidalite_t == "Oui", na.rm = TRUE), "Oui", "Non"),
     .groups = "drop"
-  )
-
-# Contrôles de structure
-stopifnot(nrow(cohort_diag) == n_distinct(pass_enrichi$id_patient))
-stopifnot(all(c("id_patient", "diag_p_2_passages", "diag_t_2_patient") %in% names(cohort_diag)))
-
-# Codage Schmoll
-cohort_diag <- cohort_diag |>
+  ) |>
   mutate(
-    diag_dominant_schmoll = sapply(diag_p_2_passages, function(x) {
-      x <- x[!is.na(x)]
-      if (length(x) == 0) return(NA_character_)
-      x <- ifelse(x %in% c("F2", "F3", "F4"), x, "AUTRES")
-      frequences <- table(factor(x, levels = c("F2", "F3", "F4", "AUTRES")))
-      names(frequences)[which.max(frequences)]
-    }),
+    # Calcul du nombre de diagnostics "Autres" (tout ce qui n'est pas F1, F2, F3, F4, F6)
+    n_Autre = n_total_diag - (n_F2 + n_F3 + n_F1 + n_F6 + n_F4),
     
-    diag_F2_schmoll = diag_dominant_schmoll == "F2",
-    diag_F3_schmoll = diag_dominant_schmoll == "F3",
-    diag_F4_schmoll = diag_dominant_schmoll == "F4",
-    diag_autres_schmoll = diag_dominant_schmoll == "AUTRES",
+    # Valeur maximale d'occurrences parmi toutes les catégories
+    max_n = pmax(n_F2, n_F3, n_F1, n_F6, n_F4, n_Autre),
     
-    diag_F1_schmoll = sapply(diag_t_2_patient, function(x) "F1" %in% x[!is.na(x)]),
-    diag_F6_schmoll = sapply(diag_t_2_patient, function(x) "F6" %in% x[!is.na(x)])
+    # Diagnostic dominant : Majorité puis Hiérarchie (F2 > F3 > F1 > F6 > F4 > Autres)
+    diag_dominant = case_when(
+      max_n == 0 ~ "Aucun diagnostic codé",
+      n_F2 == max_n ~ "Troubles psychotiques (F2)",
+      n_F3 == max_n ~ "Troubles de l'humeur (F3)",
+      n_F1 == max_n ~ "Troubles liés aux substances (F1)",
+      n_F6 == max_n ~ "Troubles de la personnalité (F6)",
+      n_F4 == max_n ~ "Troubles anxieux/névrotiques (F4)",
+      n_Autre == max_n ~ "Autres diagnostics",
+      TRUE ~ "Aucun diagnostic codé"
+    ),
+    
+    # Détection des comorbidités (variables inclusives brutes)
+    has_F6 = sapply(diag_t_2_patient, function(x) "F6" %in% x),
+    has_F1 = sapply(diag_t_2_patient, function(x) "F1" %in% x),
+    has_F1_alcool   = sapply(diag_p_passages, function(x) any(stringr::str_starts(x, "F10"))),
+    has_F1_toxiques = sapply(diag_p_passages, function(x) any(stringr::str_starts(x, "F1[1-9]")))
+  ) |>
+  mutate(
+    # Formatage en facteurs labellisés pour l'analyse
+    diag_dominant = factor(
+      diag_dominant,
+      levels = c("Troubles psychotiques (F2)", "Troubles de l'humeur (F3)", 
+                 "Troubles liés aux substances (F1)", "Troubles de la personnalité (F6)", 
+                 "Troubles anxieux/névrotiques (F4)", "Autres diagnostics", "Aucun diagnostic codé")
+    ),
+    
+    # Diagnostics associés : codés sur "Oui" uniquement s'ils ne sont pas déjà le diagnostic dominant
+    diag_F6 = dplyr::if_else(has_F6 & diag_dominant != "Troubles de la personnalité (F6)", "Oui", "Non"),
+    diag_F6 = factor(diag_F6, levels = c("Non", "Oui")),
+    
+    diag_F1 = dplyr::if_else(has_F1 & diag_dominant != "Troubles liés aux substances (F1)", "Oui", "Non"),
+    diag_F1 = factor(diag_F1, levels = c("Non", "Oui")),
+    
+    diag_F1_alcool_seul = dplyr::if_else((has_F1_alcool & !has_F1_toxiques) & diag_dominant != "Troubles liés aux substances (F1)", "Oui", "Non"),
+    diag_F1_alcool_seul = factor(diag_F1_alcool_seul, levels = c("Non", "Oui")),
+    
+    diag_F1_toxiques = dplyr::if_else(has_F1_toxiques & diag_dominant != "Troubles liés aux substances (F1)", "Oui", "Non"),
+    diag_F1_toxiques = factor(diag_F1_toxiques, levels = c("Non", "Oui")),
+    
+    diag_autres = factor(n_Autre > 0, levels = c(FALSE, TRUE), labels = c("Non", "Oui"))
+  ) |>
+  select(
+    id_patient, diag_dominant, diag_F6, diag_F1, 
+    diag_F1_alcool_seul, diag_F1_toxiques, diag_autres,
+    usage_substance_patient, suicidalite_patient
   )
 
-# Fusion
+# Fusion avec la cohorte principale
 cohort <- cohort |> left_join(cohort_diag, by = "id_patient")
 
-# Contrôles Schmoll
-stopifnot(all(rowSums(cbind(cohort_diag$diag_F2_schmoll, cohort_diag$diag_F3_schmoll, cohort_diag$diag_F4_schmoll, cohort_diag$diag_autres_schmoll), na.rm = TRUE) <= 1))
-
-message("Diagnostics Schmoll :")
-message("F2 dominant : ", sum(cohort_diag$diag_F2_schmoll, na.rm = TRUE))
-message("F3 dominant : ", sum(cohort_diag$diag_F3_schmoll, na.rm = TRUE))
-message("F4 dominant : ", sum(cohort_diag$diag_F4_schmoll, na.rm = TRUE))
-message("Autres dominant : ", sum(cohort_diag$diag_autres_schmoll, na.rm = TRUE))
-message("F1 inclusif : ", sum(cohort_diag$diag_F1_schmoll, na.rm = TRUE))
-message("F6 inclusif : ", sum(cohort_diag$diag_F6_schmoll, na.rm = TRUE))
-
+# Contrôles de structure
+message("Diagnostics dominants (N) :")
+message("F2 : ", sum(cohort_diag$diag_dominant == "Troubles psychotiques (F2)", na.rm = TRUE))
+message("F3 : ", sum(cohort_diag$diag_dominant == "Troubles de l'humeur (F3)", na.rm = TRUE))
+message("F1 : ", sum(cohort_diag$diag_dominant == "Troubles liés aux substances (F1)", na.rm = TRUE))
+message("F6 : ", sum(cohort_diag$diag_dominant == "Troubles de la personnalité (F6)", na.rm = TRUE))
+message("F4 : ", sum(cohort_diag$diag_dominant == "Troubles anxieux/névrotiques (F4)", na.rm = TRUE))
+message("Autres : ", sum(cohort_diag$diag_dominant == "Autres diagnostics", na.rm = TRUE))
+message("Aucun : ", sum(cohort_diag$diag_dominant == "Aucun diagnostic codé", na.rm = TRUE))
 
 # ======================================================================
 # 8. Variables d'hospitalisation
@@ -293,9 +332,50 @@ message("Patients avec au moins une hospitalisation : ", sum(cohort$hospitalisat
 message("Nombre total d'hospitalisations : ", sum(cohort$nb_hospitalisation))
 message("Nombre total d'hospitalisations SSC : ", sum(cohort$nb_hospitalisation_ssc))
 
+# ======================================================================
+# 9. Variables temporelles et hospitalisation complément
+# ======================================================================
+
+cohort_parcours <- pass_enrichi |>
+  group_by(id_patient) |>
+  summarise(
+    # 1. Total des passages
+    n_passages = n(),
+    
+    # 2. Temporalité : Nuit
+    n_passages_nuit = sum(nuit_arrivee == TRUE | nuit_arrivee == "Oui", na.rm = TRUE),
+    pct_passage_nuit = (n_passages_nuit / n_passages) * 100,
+    au_moins_un_passage_nuit = dplyr::if_else(n_passages_nuit > 0, "Oui", "Non"),
+    
+    # 3. Temporalité : Garde 
+    n_passages_garde = sum(garde == TRUE | garde == "Oui", na.rm = TRUE),
+    pct_passage_garde = (n_passages_garde / n_passages) * 100,
+    au_moins_un_passage_garde = dplyr::if_else(n_passages_garde > 0, "Oui", "Non"),
+    
+    # 4. Temporalité : Week-end 
+    n_passages_we = sum(weekend_arrivee == TRUE | weekend_arrivee == "Oui", na.rm = TRUE),
+    pct_passage_we = (n_passages_we / n_passages) * 100,
+    au_moins_un_passage_we = dplyr::if_else(n_passages_we > 0, "Oui", "Non"),
+    
+    # 5. Taux d'hospitalisation (Basé sur l'orientation finale du passage)
+    taux_hospitalisation = (sum(orientation_finale == "HOSPIT_PSY", na.rm = TRUE) / n_passages) * 100,
+    
+    # 6. Durées de soins (LOS) conditionnelles
+    duree_soins_moyenne_hospit = mean(as.numeric(LOS)[orientation_finale == "HOSPIT_PSY"], na.rm = TRUE),
+    duree_soins_moyenne_non_hospit = mean(as.numeric(LOS)[orientation_finale != "HOSPIT_PSY" | is.na(orientation_finale)], na.rm = TRUE),
+    
+    .groups = "drop"
+  ) |>
+  mutate(
+    duree_soins_moyenne_hospit = dplyr::if_else(is.nan(duree_soins_moyenne_hospit), NA_real_, duree_soins_moyenne_hospit),
+    duree_soins_moyenne_non_hospit = dplyr::if_else(is.nan(duree_soins_moyenne_non_hospit), NA_real_, duree_soins_moyenne_non_hospit)
+  )
+
+# Fusion avec la table cohort principale
+cohort <- cohort |> left_join(cohort_parcours, by = "id_patient")
 
 # ======================================================================
-# 9. Définition des Frequent Users
+# 10. Définition des Frequent Users
 # ======================================================================
 
 nb_passages_365j <- pass_enrichi |>
