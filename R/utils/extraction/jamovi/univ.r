@@ -2,14 +2,26 @@
 # 5. Export des données pour jamovi
 # ======================================================================
 
-# Sélection stricte des variables du Tableau 1
+library(dplyr)
+library(haven)
+
 data_jamovi <- tableau1_data |>
+  # 1. On supprime l'ancienne variable si elle était déjà là pour éviter le conflit .x et .y
+  select(-any_of("hopital_secteur")) |>
+  
+  # 2. On colle la bonne variable venant de "cohort"
+  left_join(
+    cohort |> select(id_patient, hopital_secteur), 
+    by = "id_patient"
+  ) |>
+  
+  # 3. On fait notre sélection finale propre
   select(
     # Identifiant & Groupe
     id_patient, FU3,
     
-    # Sociodémographie
-    age, age_cat, sexe, residence_region,
+    # Sociodémographie & Organisation
+    age, age_cat, sexe, residence_region, hopital_secteur,
     
     # Diagnostics
     diag_dominant, has_diag_associe, diag_F6, diag_F1, 
@@ -24,10 +36,10 @@ data_jamovi <- tableau1_data |>
     hospitalisation_sl, hospitalisation_ssc
   )
 
-# Export au format SPSS (.sav) lisible par jamovi (conserve les types et niveaux)
-if (!requireNamespace("haven", quietly = TRUE)) install.packages("haven")
-
+# Export au format SPSS (.sav)
 haven::write_sav(
   data_jamovi, 
   here::here("data", "exports", "data_tableau1_jamovi.sav")
 )
+
+print("Succès : Le conflit de noms a été évité et le fichier est exporté !")

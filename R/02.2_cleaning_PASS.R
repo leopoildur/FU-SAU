@@ -171,13 +171,13 @@ pass <- pass |>
     diag_p_2 = stringr::str_sub(diag_p, 1, 2),
     diag_p_3 = stringr::str_sub(diag_p, 1, 3),
     
-    # Catégorisation
-    categorie_diag_p = categoriser_cim10(diag_p),
-    usage_substance_p = detecter_usage_substance(categorie_diag_p)
+    # Catégorisation via le dictionnaire centralisé
+    famille_diag_p = get_famille_psy(diag_p),
+    usage_substance_p = dplyr::if_else(is_addictif_global(diag_p), "Oui", "Non")
   )
 
 pass |> count(diag_p, sort = TRUE)
-pass |> count(categorie_diag_p, sort = TRUE)
+pass |> count(famille_diag_p, sort = TRUE)
 
 ## Diagnostics associés --------------------------------------------------
 pass <- pass |>
@@ -209,9 +209,9 @@ pass <- pass |>
     diag_t_3 = lapply(diag_t, function(x) stringr::str_sub(x, 1, 3)),
     nb_diag_t = lengths(diag_t),
     
-    # Dépistage transversal
-    usage_substance_t = purrr::map_chr(diag_t, ~ dplyr::if_else(any(detecter_usage_substance(categoriser_cim10(.x)) == "Oui"), "Oui", "Non")),
-    suicidalite_t = purrr::map_chr(diag_t, ~ dplyr::if_else(any(categoriser_cim10(.x) == "Suicidalité"), "Oui", "Non"))
+    # Dépistage transversal via le dictionnaire
+    usage_substance_t = purrr::map_chr(diag_t, ~ dplyr::if_else(any(is_addictif_global(.x)), "Oui", "Non")),
+    suicidalite_t = purrr::map_chr(diag_t, ~ dplyr::if_else(any(is_suicidaire(.x)), "Oui", "Non"))
   )
 
 ## Contrôles -------------------------------------------------------------

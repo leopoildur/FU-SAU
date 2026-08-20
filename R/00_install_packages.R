@@ -28,7 +28,9 @@ packages <- c(
   "slider",
   "timeDate",
   "DiagrammeR",
-  "igraph"
+  "igraph",
+  "future",
+  "furrr"
 )
 
 
