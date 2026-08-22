@@ -29,8 +29,7 @@ packages <- c(
   "timeDate",
   "DiagrammeR",
   "igraph",
-  "future",
-  "furrr"
+  "labelled"
 )
 
 

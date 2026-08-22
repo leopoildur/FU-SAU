@@ -248,6 +248,7 @@ pass <- pass |>
       TRUE ~ "HORS_IDF"
     ),
     hopital_secteur = dplyr::case_when(
+      stringr::str_detect(hopital_secteur, "(?i)brousse") ~ "AUTRES",
       !is.na(hopital_secteur) ~ hopital_secteur,
       TRUE ~ "AUTRES"
     ),

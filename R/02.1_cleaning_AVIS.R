@@ -136,12 +136,6 @@ summary(as.numeric(avis$LOS))
 # Âge -------------------------------------------------------------------
 summary(avis$age)
 
-avis |>
-  ggplot(aes(x = age)) +
-  geom_histogram(binwidth = 5, fill = "#4E79A7", color = "white") +
-  labs(title = "Distribution des âges", x = "Âge (années)", y = "Nombre d'avis") +
-  theme_fu()
-
 # Sexe, Code postal, Département ----------------------------------------
 avis <- avis |>
   rename(code_postal = cp) |>

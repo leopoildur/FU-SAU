@@ -32,7 +32,7 @@ is_cannabis <- function(codes) {
 #' Détecter les troubles et intoxications liés aux autres toxiques (hors alcool et cannabis)
 is_autre_toxique <- function(codes) {
   c_codes <- clean_cim10_code(codes)
-  pattern <- "^(F1[1345689]|F55|T40[0-689]|T42[3467]|T43[5689]|T509|T52[89])"
+  pattern <- "^(F1[1345689]|F55|T40[0-689])"
   str_detect(c_codes, pattern)
 }
 
@@ -44,7 +44,7 @@ is_addictif_global <- function(codes) {
 #' Détecter la suicidalité (idées, auto-lésions, tentatives de suicide)
 is_suicidaire <- function(codes) {
   c_codes <- clean_cim10_code(codes)
-  pattern <- "^(R458|X6[0-9]|X7[0-9]|X8[0-4]|Z915)"
+  pattern <- "^(R458|X6[0-9]|X7[0-9]|X8[0-4]|Z915|T42[3467]|T43[5689]|T509|T52[89])"
   str_detect(c_codes, pattern)
 }
 

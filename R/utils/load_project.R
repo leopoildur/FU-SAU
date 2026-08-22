@@ -5,6 +5,7 @@ library(skimr)
 library(janitor)
 library(naniar)
 library(here)
+library(labelled)
 
 source(here("R", "utils", "constants.R"))
 source(here("R", "utils", "dictionaries.R"))

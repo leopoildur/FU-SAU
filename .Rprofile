@@ -33,21 +33,3 @@ if (!dir.exists(user_library)) {
     .Library
   )
 )
-
-local({
-  # 1. Détection des cœurs matériels (On garde 1 cœur libre pour la stabilité du système)
-  n_cores <- max(1, parallel::detectCores(logical = FALSE) - 1)
-  
-  # 2. Configuration pour les fonctions de base (ex: mclapply)
-  options(mc.cores = n_cores)
-  
-  # 3. Configuration pour le framework 'future' (utilisé par furrr pour le tidyverse)
-  if (requireNamespace("future", quietly = TRUE)) {
-    future::plan(future::multisession, workers = n_cores)
-  }
-  
-  # 4. Configuration pour data.table (si vous l'utilisez)
-  if (requireNamespace("data.table", quietly = TRUE)) {
-    data.table::setDTthreads(n_cores)
-  }
-})

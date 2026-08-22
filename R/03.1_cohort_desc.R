@@ -247,12 +247,11 @@ diag_dominant_patient <- diagnostics_long |>
   ungroup() |>
   select(id_patient, famille_dominante = famille)
 
-# 7.3. Définition du profil majoritaire et balayage des comorbidités
+# 7.3. Définition du profil majoritaire et balayage des comorbidités (Optimisation séquentielle)
 cohort_diag <- pass_enrichi |>
   arrange(id_patient, date_arrivee) |>
   group_by(id_patient) |>
   summarise(
-    # Extraction de l'historique complet des codes bruts pour balayage
     diag_t_patient = list(unique(na.omit(unlist(diag_t_passage)))),
     suicidalite_patient = dplyr::if_else(any(suicidalite_t == "Oui", na.rm = TRUE), "Oui", "Non"),
     .groups = "drop"
@@ -266,8 +265,8 @@ cohort_diag <- pass_enrichi |>
       famille_dominante == "F4" ~ "Troubles anxieux/névrotiques (F4)",
       famille_dominante == "F6" ~ "Troubles de la personnalité (F6)",
       famille_dominante == "F1" ~ "Troubles liés aux substances (F1)",
-      famille_dominante == "Autres_F" ~ "Autres diagnostics psychiatriques",
-      famille_dominante == "Non_Psy" ~ "Aucun diagnostic psychiatrique"
+      famille_dominante == "Non_Psy" ~ "Aucun diagnostic psychiatrique",
+      TRUE ~ "Autres diagnostics psychiatriques"
     ),
     diag_dominant = factor(
       diag_dominant,
@@ -278,29 +277,29 @@ cohort_diag <- pass_enrichi |>
     ),
     
     # Balayage transversal de l'historique diagnostique via le dictionnaire
-    hist_F0 = sapply(diag_t_patient, function(x) any(get_famille_psy(x) == "F0")),
-    hist_addiction_global = sapply(diag_t_patient, function(x) any(is_addictif_global(x))),
-    hist_alcool = sapply(diag_t_patient, function(x) any(is_alcool(x))),
-    hist_cannabis = sapply(diag_t_patient, function(x) any(is_cannabis(x))),
-    hist_autre_toxique = sapply(diag_t_patient, function(x) any(is_autre_toxique(x))),
-    hist_F2 = sapply(diag_t_patient, function(x) any(get_famille_psy(x) == "F2")),
-    hist_F3 = sapply(diag_t_patient, function(x) any(get_famille_psy(x) == "F3")),
-    hist_F4 = sapply(diag_t_patient, function(x) any(get_famille_psy(x) == "F4")),
-    hist_F5 = sapply(diag_t_patient, function(x) any(get_famille_psy(x) == "F5")),
-    hist_F6 = sapply(diag_t_patient, function(x) any(get_famille_psy(x) == "F6")),
-    hist_ND = sapply(diag_t_patient, function(x) any(get_famille_psy(x) == "F7_F9")),
+    hist_F0 = vapply(diag_t_patient, function(x) any(get_famille_psy(x) == "F0"), logical(1)),
+    hist_addiction_global = vapply(diag_t_patient, function(x) any(is_addictif_global(x)), logical(1)),
+    hist_alcool = vapply(diag_t_patient, function(x) any(is_alcool(x)), logical(1)),
+    hist_cannabis = vapply(diag_t_patient, function(x) any(is_cannabis(x)), logical(1)),
+    hist_autre_toxique = vapply(diag_t_patient, function(x) any(is_autre_toxique(x)), logical(1)),
+    hist_F2 = vapply(diag_t_patient, function(x) any(get_famille_psy(x) == "F2"), logical(1)),
+    hist_F3 = vapply(diag_t_patient, function(x) any(get_famille_psy(x) == "F3"), logical(1)),
+    hist_F4 = vapply(diag_t_patient, function(x) any(get_famille_psy(x) == "F4"), logical(1)),
+    hist_F5 = vapply(diag_t_patient, function(x) any(get_famille_psy(x) == "F5"), logical(1)),
+    hist_F6 = vapply(diag_t_patient, function(x) any(get_famille_psy(x) == "F6"), logical(1)),
+    hist_ND = vapply(diag_t_patient, function(x) any(get_famille_psy(x) == "F7_F9"), logical(1)),
     
     # Comorbidités binaires (Exclusion de la classe majoritaire correspondante)
     comorb_F0 = factor(if_else(hist_F0, "Oui", "Non"), levels = c("Non", "Oui")),
-    comorb_F1 = factor(if_else(hist_addiction_global & diag_dominant != "Troubles liés aux substances (F1)", "Oui", "Non"), levels = c("Non", "Oui")),
-    comorb_alcool = factor(if_else(hist_alcool & diag_dominant != "Troubles liés aux substances (F1)", "Oui", "Non"), levels = c("Non", "Oui")),
-    comorb_cannabis = factor(if_else(hist_cannabis & diag_dominant != "Troubles liés aux substances (F1)", "Oui", "Non"), levels = c("Non", "Oui")),
-    comorb_autre_toxique = factor(if_else(hist_autre_toxique & diag_dominant != "Troubles liés aux substances (F1)", "Oui", "Non"), levels = c("Non", "Oui")),
-    comorb_F2 = factor(if_else(hist_F2 & diag_dominant != "Troubles psychotiques (F2)", "Oui", "Non"), levels = c("Non", "Oui")),
-    comorb_F3 = factor(if_else(hist_F3 & diag_dominant != "Troubles de l'humeur (F3)", "Oui", "Non"), levels = c("Non", "Oui")),
-    comorb_F4 = factor(if_else(hist_F4 & diag_dominant != "Troubles anxieux/névrotiques (F4)", "Oui", "Non"), levels = c("Non", "Oui")),
+    comorb_F1 = factor(if_else(hist_addiction_global & !(diag_dominant %in% "Troubles liés aux substances (F1)"), "Oui", "Non"), levels = c("Non", "Oui")),
+    comorb_alcool = factor(if_else(hist_alcool & !(diag_dominant %in% "Troubles liés aux substances (F1)"), "Oui", "Non"), levels = c("Non", "Oui")),
+    comorb_cannabis = factor(if_else(hist_cannabis & !(diag_dominant %in% "Troubles liés aux substances (F1)"), "Oui", "Non"), levels = c("Non", "Oui")),
+    comorb_autre_toxique = factor(if_else(hist_autre_toxique & !(diag_dominant %in% "Troubles liés aux substances (F1)"), "Oui", "Non"), levels = c("Non", "Oui")),
+    comorb_F2 = factor(if_else(hist_F2 & !(diag_dominant %in% "Troubles psychotiques (F2)"), "Oui", "Non"), levels = c("Non", "Oui")),
+    comorb_F3 = factor(if_else(hist_F3 & !(diag_dominant %in% "Troubles de l'humeur (F3)"), "Oui", "Non"), levels = c("Non", "Oui")),
+    comorb_F4 = factor(if_else(hist_F4 & !(diag_dominant %in% "Troubles anxieux/névrotiques (F4)"), "Oui", "Non"), levels = c("Non", "Oui")),
     comorb_F5 = factor(if_else(hist_F5, "Oui", "Non"), levels = c("Non", "Oui")),
-    comorb_F6 = factor(if_else(hist_F6 & diag_dominant != "Troubles de la personnalité (F6)", "Oui", "Non"), levels = c("Non", "Oui")),
+    comorb_F6 = factor(if_else(hist_F6 & !(diag_dominant %in% "Troubles de la personnalité (F6)"), "Oui", "Non"), levels = c("Non", "Oui")),
     comorb_ND = factor(if_else(hist_ND, "Oui", "Non"), levels = c("Non", "Oui"))
   ) |>
   select(id_patient, diag_dominant, starts_with("comorb_"), suicidalite_patient)
@@ -308,7 +307,7 @@ cohort_diag <- pass_enrichi |>
 cohort <- cohort |> left_join(cohort_diag, by = "id_patient")
 
 # ======================================================================
-# 8. Variables d'hospitalisation
+# 8.1 Variables d'hospitalisation
 # ======================================================================
 
 cohort_organisation <- pass_enrichi |>
@@ -329,7 +328,7 @@ cohort <- cohort |> left_join(cohort_organisation, by = "id_patient")
 
 
 # ======================================================================
-# 8.5 Variables du Passage Index (Premier passage)
+# 8.2 Variables du Passage Index (Premier passage)
 # ======================================================================
 
 passage_index <- pass_enrichi |>
@@ -337,13 +336,19 @@ passage_index <- pass_enrichi |>
   group_by(id_patient) |>
   slice_head(n = 1) |>
   summarise(
-    orientation_index = if_else(orientation_finale == "HOSPIT_PSY", "Hospitalisation", "Retour Domicile / Autre"),
-    ssc_index = if_else(mls_g == "SSC", "Oui", "Non"),
+    orientation_index_3m = case_when(
+      orientation_finale != "HOSPIT_PSY" | is.na(orientation_finale) ~ "Non admis",
+      orientation_finale == "HOSPIT_PSY" & mls_g == "SL"  ~ "Hospitalisation SL",
+      orientation_finale == "HOSPIT_PSY" & mls_g == "SSC" ~ "Hospitalisation SSC",
+      TRUE ~ "Non admis"
+    ),
     .groups = "drop"
   ) |>
   mutate(
-    orientation_index = factor(orientation_index, levels = c("Retour Domicile / Autre", "Hospitalisation")),
-    ssc_index = factor(ssc_index, levels = c("Non", "Oui"))
+    orientation_index_3m = factor(
+      orientation_index_3m, 
+      levels = c("Non admis", "Hospitalisation SL", "Hospitalisation SSC")
+    )
   )
 
 cohort <- cohort |> left_join(passage_index, by = "id_patient")
@@ -413,21 +418,19 @@ cohort <- cohort |>
 # ======================================================================
 # 11. Sauvegarde et Export automatisé pour Jamovi
 # ======================================================================
-install.packages("labelled")
-library(labelled)
 
 # Sauvegarde de la cohorte R brute
 saveRDS(cohort, here::here("data", "processed", "cohort.rds"))
 readr::write_csv(cohort, here::here("data", "exports", "cohort_pvalue.csv"))
 
-# 1. Sélection et formatage des modalités (Facteurs)
+# 1. Sélection, formatage des modalités et noms de colonnes valides SPSS
 data_jamovi <- cohort |>
   transmute(
-    id_patient = id_patient,
-    
-    FU3 = factor(FU3, 
-                 levels = c("Non", "Oui"), 
-                 labels = c("Utilisateurs occasionnels (NFU)", "Utilisateurs fréquents (FU)")),
+    FU3 = factor(
+      FU3, 
+      levels = c("Non", "Oui"), 
+      labels = c("Utilisateurs occasionnels (NFU)", "Utilisateurs fréquents (FU)")
+    ),
     
     age = age,
     age_cat = age_cat,
@@ -438,6 +441,9 @@ data_jamovi <- cohort |>
     
     comorb_F0 = comorb_F0,
     comorb_F1 = comorb_F1,
+    comorb_alcool = comorb_alcool,
+    comorb_cannabis = comorb_cannabis,
+    comorb_autre_toxique = comorb_autre_toxique,
     comorb_F2 = comorb_F2,
     comorb_F3 = comorb_F3,
     comorb_F4 = comorb_F4,
@@ -458,46 +464,43 @@ data_jamovi <- cohort |>
     hospitalisation = hospitalisation,
     hospitalisation_ssc = hospitalisation_ssc,
     
-    orientation_index = factor(orientation_index,
-                               levels = c("Retour Domicile / Autre", "Hospitalisation"),
-                               labels = c("Non admission", "Hospitalisation en psychiatrie")),
-    
-    ssc_index = factor(ssc_index,
-                       levels = c("Non", "Oui"),
-                       labels = c("Soins libres", "Soins sous contrainte"))
+    orientation_index_3m = orientation_index_3m
   ) |>
   
-# 2. Ajout des métadonnées (Les étiquettes lues par Jamovi)
+  # 2. Définition des étiquettes lues par Jamovi pour les affichages de tableaux
   set_variable_labels(
+    FU3 = "Statut d'utilisateur fréquent",
     age = "Âge",
     age_cat = "Catégories d'âge",
     sexe = "Sexe",
     residence_region = "Département de résidence",
     hopital_secteur = "Hôpital de rattachement",
     diag_dominant = "Profil diagnostique majoritaire",
-    comorb_F0 = "F0",
-    comorb_F1 = "Troubles liés à l'usage de substances (F1)",
-    comorb_F2 = "F2",
-    comorb_F3 = "F3",
-    comorb_F4 = "F4",
-    comorb_F5 = "F5",
-    comorb_F6 = "Troubles de la personnalité (F6)",
-    comorb_ND = "Troubles neurodéveloppementaux (F7-F8-F9)",
+    comorb_F0 = "Comorbidité - F0",
+    comorb_F1 = "Comorbidité - Troubles de l'usage (Global F1)",
+    comorb_alcool = "Comorbidité - Alcool",
+    comorb_cannabis = "Comorbidité - Cannabis",
+    comorb_autre_toxique = "Comorbidité - Autres substances",
+    comorb_F2 = "Comorbidité - F2",
+    comorb_F3 = "Comorbidité - F3",
+    comorb_F4 = "Comorbidité - F4",
+    comorb_F5 = "Comorbidité - F5",
+    comorb_F6 = "Comorbidité - Troubles de la personnalité (F6)",
+    comorb_ND = "Comorbidité - Troubles neurodéveloppementaux (F7-F8-F9)",
     suicidalite_patient = "Suicidalité",
     duree_soins_mediane = "Durée de soins en minutes, médiane (IQR)",
     duree_soins_mediane_hospit = "DMS médian hospitalisé",
     duree_soins_mediane_non_hospit = "DMS médian non hospitalisé",
-    au_moins_un_passage_garde = "au_moins_un_passage_garde",
-    au_moins_un_passage_nuit = "au_moins_un_passage_nuit",
-    au_moins_un_passage_we = "au_moins_un_passage_we",
+    au_moins_un_passage_garde = "Au moins un passage de garde",
+    au_moins_un_passage_nuit = "Au moins un passage de nuit",
+    au_moins_un_passage_we = "Au moins un passage de week-end",
     hospitalisation = "Au moins une hospitalisation en psychiatrie",
     hospitalisation_ssc = "Au moins une hospitalisation en soins sous contrainte",
-    orientation_index = "Passage Index - Orientation",
-    ssc_index = "Passage Index - Mode légal de soins"
+    orientation_index_3m = "Passage Index - Admission et mode légal"
   )
 
 # Export direct au format SPSS/Jamovi (.sav)
 dir.create(here::here("data", "exports"), showWarnings = FALSE, recursive = TRUE)
-haven::write_sav(data_jamovi, here::here("data", "exports", "cohort_jamovi.sav"))
+haven::write_sav(data_jamovi, here::here("data", "exports", "cohort_desc_jamovi.sav"))
 
-message("Export Jamovi généré avec succès dans data/exports/cohort_jamovi.sav")
+message("Export Jamovi généré avec succès dans data/exports/cohort_desc_jamovi.sav")
